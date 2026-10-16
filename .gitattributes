@@ -1,0 +1,11 @@
+# 行尾统一在仓库里存 LF，检出时按下面的规则来。
+# 这样不管谁 clone、core.autocrlf 怎么设，结果都一样。
+* text=auto eol=lf
+
+# 批处理文件必须是 CRLF：只有 LF 时 cmd.exe 解析 if(...) 之类的块级语法会失败。
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制，别做任何转换
+*.png binary
+*.ico binary

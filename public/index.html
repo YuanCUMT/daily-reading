@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>每日阅读 · 考研英语</title>
+<link rel="stylesheet" href="/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">📖</span>
+      <div>
+        <h1>每日阅读</h1>
+        <p id="brandSub">用今天背的考研单词，读一篇真题风格的文章</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <input type="date" id="datePicker" />
+      <select id="modeQuick" class="mode-quick" title="文章模式（切完点「生成文章」生效）">
+        <option value="review">复习模式</option>
+        <option value="exam">真题模式</option>
+      </select>
+      <button class="btn ghost" id="btnImport">导入单词</button>
+      <button class="btn primary" id="btnGenerate">生成文章</button>
+      <button class="btn icon" id="btnSettings" title="设置">⚙️</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>今日单词 <span class="count" id="wordCount">0</span>
+          <button class="mini-btn" id="btnClearWords" title="清空今天的单词">清空</button>
+        </h2>
+        <div id="wordList" class="word-list"></div>
+      </section>
+      <section class="panel">
+        <h2>历史文章</h2>
+        <div id="archive" class="archive"></div>
+      </section>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="empty" id="empty">
+        <h2>还没有今天的文章</h2>
+        <p>先把今天背的单词弄进来，再点「生成文章」。</p>
+        <div class="empty-actions">
+          <button class="btn primary" data-act="image">上传截图识别</button>
+          <button class="btn ghost" data-act="import">手动粘贴</button>
+        </div>
+        <p class="hint" id="emptyHint"></p>
+      </div>
+      <article id="articleView" hidden></article>
+    </main>
+  </div>
+</div>
+
+<!-- ============ 导入单词 ============ -->
+<div class="modal" id="modalImport" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>导入今天的单词</h3>
+      <button class="btn icon" data-close>✕</button>
+    </header>
+    <div class="modal-body">
+      <div class="tabs">
+        <button class="tab active" data-tab="image">上传截图识别</button>
+        <button class="tab" data-tab="paste">手动粘贴</button>
+      </div>
+
+      <div class="tab-panel" data-panel="image">
+        <div id="dropzone" class="dropzone">
+          <div class="dz-icon">🖼️</div>
+          <p class="dz-main">把百词斩的截图拖进来</p>
+          <p class="dz-sub">也可以点这里选图片，或者直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴</p>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden />
+        </div>
+        <div id="thumbs" class="thumbs"></div>
+        <div class="row-inline">
+          <button class="btn primary" id="btnDoOcr" disabled>开始识别</button>
+          <label class="switch"><input type="checkbox" id="chkOcrFix" /> 用 AI 校正拼写、剔除界面文字</label>
+        </div>
+        <div id="ocrResult" class="fetch-result"></div>
+      </div>
+
+      <div class="tab-panel" data-panel="paste" hidden>
+        <p class="tip">一行一个，中英文都行：</p>
+        <pre class="example">abandon 放弃
+procedure /prəˈsiːdʒə/ n. 程序，步骤
+reluctant</pre>
+        <textarea id="pasteBox" rows="8" placeholder="在这里粘贴单词……"></textarea>
+        <div id="pastePreview" class="paste-preview"></div>
+      </div>
+    </div>
+    <footer>
+      <span class="status" id="importStatus"></span>
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btnSaveWords">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ 设置 ============ -->
+<div class="modal" id="modalSettings" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>设置</h3>
+      <button class="btn icon" data-close>✕</button>
+    </header>
+    <div class="modal-body">
+      <h4>DeepSeek 模型</h4>
+      <label>API Key <input type="password" id="cfgKey" placeholder="sk-..." autocomplete="off" /></label>
+      <p class="tip">Key 只保存在本机的 data/config.json，不会上传到任何第三方。截图识别用的是 Windows 自带 OCR，不消耗 Key。</p>
+      <div class="grid2">
+        <label>接口地址 <input type="text" id="cfgBase" /></label>
+        <label>模型 <input type="text" id="cfgModel" /></label>
+      </div>
+
+      <h4>文章偏好（考研）</h4>
+      <label>模式
+        <select id="cfgMode">
+          <option value="review">复习模式 —— 今天背的词尽量全用上，文章好读</option>
+          <option value="exam">真题模式 —— 像考研阅读原文，只挑一部分词用</option>
+        </select>
+      </label>
+      <p class="tip" id="modeTip"></p>
+      <label>难度
+        <select id="cfgLevel">
+          <option>C1（考研英语一难度）</option>
+          <option>B2（考研英语二 / 六级）</option>
+          <option>C2（接近外刊原文）</option>
+          <option>B1（先打基础）</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>段落数 <input type="number" id="cfgParas" min="3" max="14" /></label>
+        <label>题量 <input type="number" id="cfgQuestionCount" min="0" max="8" /></label>
+      </div>
+      <label id="examLimitRow">真题模式每篇用词数 <input type="number" id="cfgExamLimit" min="6" max="30" /></label>
+      <label>题材
+        <select id="cfgStyle">
+          <option>考研真题风格（社科 / 科普议论文）</option>
+          <option>经济与商业</option>
+          <option>科技与创新</option>
+          <option>社会与文化</option>
+          <option>教育与心理</option>
+          <option>环境与能源</option>
+          <option>法律与伦理</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" id="cfgLongSentences" /> 生成「长难句拆解」</label>
+      <label class="inline"><input type="checkbox" id="cfgQuestions" /> 生成理解题（考研五大题型）</label>
+      <label class="inline"><input type="checkbox" id="cfgOcrFix" /> 截图识别后自动用 AI 校正拼写</label>
+    </div>
+    <footer>
+      <span class="status" id="settingsStatus"></span>
+      <button class="btn ghost" data-close>关闭</button>
+      <button class="btn primary" id="btnSaveSettings">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ 单词详情浮层 ============ -->
+<div class="popover" id="popover" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<div class="loading" id="loading" hidden>
+  <div class="spinner"></div>
+  <p id="loadingText">正在写作……</p>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
