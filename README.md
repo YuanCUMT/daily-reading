@@ -3,7 +3,10 @@
 把今天背的单词变成一篇**考研英语阅读真题风格**的文章，配长难句拆解和真题题型。
 本地跑，数据全在自己电脑上。
 
-<img src="test/screenshot.png" width="720" alt="界面截图" />
+<!-- 图片走 jsDelivr：GitHub 自己的 raw.githubusercontent.com 在国内经常不可达，
+     README 里的相对路径图片会变成裂图。jsDelivr 会缓存本仓库的内容，国内可访问。
+     如果哪天 jsDelivr 也不通了，把 src 换回 docs/screenshot-exam.png 即可。 -->
+<img src="https://cdn.jsdelivr.net/gh/YuanCUMT/daily-reading@main/docs/screenshot-exam.png" width="880" alt="界面截图" />
 
 ## 快速开始
 
@@ -114,9 +117,7 @@ OCR 认成：ViVid     →  自动修正为：vivid
 
 两种模式都会检查每个词是否真的出现在文中。复习模式下没用到的词会在标题下方标出来；真题模式只用到一部分词是正常的，所以不报警，改为显示「本篇用到 12/44 个词」。
 
-模式可以在**顶栏一键切换**，也可以在设置里改：
-
-<img src="test/screenshot-settings.png" width="620" alt="设置面板" />
+模式可以在**顶栏一键切换**（日期右边那个下拉框），也可以在设置里改。
 
 设置里可以调：模式、难度（考研英语一 / 英语二 / 外刊原文）、段落数、题量、题材（经济、科技、社会、教育、环境、法律…）、长难句开关、题目开关。
 
@@ -130,6 +131,8 @@ bcz-reader/
 ├─ tools/
 │  ├─ make-icon.ps1       生成 icon.ico
 │  └─ install-shortcut.ps1 在桌面创建快捷方式
+├─ docs/
+│  └─ screenshot-exam.png README 里的界面截图（真题模式实拍）
 ├─ lib/
 │  ├─ store.js            data/ 目录的读写
 │  ├─ prompt.js           考研向提示词 + 模型输出校验
