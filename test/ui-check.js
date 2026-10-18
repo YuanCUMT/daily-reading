@@ -460,24 +460,48 @@ function seed() {
     check('收藏后按钮变成「已在生词本」', marks1.btn.includes('已在生词本'), marks1.btn);
     check('生词本计数同步', marks1.count === '1', marks1.count);
 
+    // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
+    await waitFor(() => cdp.eval(`document.querySelectorAll('mark.word.mine[data-tmp="1"]').length > 0`), {
+      label: '非目标词立刻变色',
+    });
+    const wrapped = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        tmp: document.querySelectorAll('mark.word[data-tmp="1"]').length,
+        hw: document.querySelector('mark.word[data-tmp="1"]')?.dataset.hw,
+        inPara: !!document.querySelector('.para .en mark.word[data-tmp="1"]')
+      })`)
+    );
+    check('收藏后正文立刻给这个词包上高亮', wrapped.tmp > 0 && wrapped.inPara === true, JSON.stringify(wrapped));
+    check('临时高亮的词就是刚才点的词', String(wrapped.hw).toLowerCase() === 'paragraph', wrapped.hw);
+
     // 标一个今日目标词：正文里应该从黄底变成「生词本」样式
-    await cdp.eval(`document.querySelector('mark.word').click(); 'ok'`);
+    await cdp.eval(`document.querySelector('#articleView mark.word:not([data-tmp])').click(); 'ok'`);
     await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层' });
     await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('mark.word.mine').length > 0`), { label: '目标词变成生词本样式' });
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 2`), {
+      label: '收藏目标词',
+    });
     const marks2 = JSON.parse(
       await cdp.eval(`JSON.stringify({
         chips: document.querySelectorAll('#markList .mark-chip').length,
-        mine: document.querySelectorAll('mark.word.mine').length
+        mine: document.querySelectorAll('#articleView mark.word.mine:not([data-tmp])').length
       })`)
     );
     check('生词本里现在有两项', marks2.chips === 2, JSON.stringify(marks2));
     check('标过的目标词在正文里换了样式', marks2.mine > 0, JSON.stringify(marks2));
 
-    // 从侧栏移除一个
-    await cdp.eval(`document.querySelector('#markList .mark-chip [data-rm]').click(); 'ok'`);
+    // 从侧栏移除刚才那个非目标词：正文里要拆回纯文本，不能留下黄色目标词样式
+    await cdp.eval(`document.querySelector('#markList [data-rm="paragraph"]').click(); 'ok'`);
     await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '移出生词本' });
-    check('能从侧栏把词移出生词本', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
+    const afterRemove = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        chips: document.querySelectorAll('#markList .mark-chip').length,
+        tmp: document.querySelectorAll('mark.word[data-tmp="1"]').length,
+        stillMarked: document.querySelectorAll('#markList .mark-chip .w')[0]?.textContent
+      })`)
+    );
+    check('能从侧栏把词移出生词本', afterRemove.chips === 1, JSON.stringify(afterRemove));
+    check('移出后临时高亮被拆回纯文本', afterRemove.tmp === 0, JSON.stringify(afterRemove));
 
     // 收尾：关掉浮层，留下一项生词本内容给截图用
     await cdp.eval(`document.getElementById('popover').hidden = true; 'ok'`);

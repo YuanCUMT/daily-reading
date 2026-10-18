@@ -601,25 +601,94 @@ async function markWord(word, g, entry) {
     },
   });
   setMarks(data.marks);
-  paintMark(word, true);
+  paintMark(word, true, src.word);
   toast(`已加入生词本：${word}`);
 }
 
 async function unmarkWord(word, lemma) {
   const data = await api(`/api/marks?word=${encodeURIComponent(word)}`, { method: 'DELETE' });
   setMarks(data.marks);
-  paintMark(word, false);
-  if (lemma) paintMark(lemma, false);
+  paintMark(word, false, lemma);
 }
 
-/** 只改正文里已有的高亮，不重渲染整篇文章（否则会丢答题进度和滚动位置） */
-function paintMark(word, on) {
+/**
+ * 只改正文里已有的高亮，不重渲染整篇文章（否则会丢答题进度和滚动位置）。
+ * 非今日目标词在正文里还只是纯文本，这里就地包一层 <mark>，收藏完立刻能看到蓝色。
+ */
+function paintMark(word, on, lemma) {
   const key = String(word || '').toLowerCase();
   if (!key) return;
   $$('mark.word').forEach((el) => {
     const hw = (el.dataset.hw || '').toLowerCase();
     if (hw === key || hw.startsWith(key) || key.startsWith(hw)) el.classList.toggle('mine', on);
   });
+  if (on) wrapWordInPlace(word, lemma);
+  else unwrapWordInPlace(word, lemma);
+}
+
+/** 把正文里还是纯文本的这个词就地包成 <mark class="word mine" data-tmp="1"> */
+function wrapWordInPlace(word, lemma) {
+  const pattern = buildWordPattern([], [word, lemma].filter(Boolean));
+  if (!pattern) return 0;
+  let count = 0;
+  for (const p of $$('.para .en')) {
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.parentElement?.closest('mark.word')) continue; // 已经是高亮词了，别套两层
+      textNodes.push(node);
+    }
+    for (const tn of textNodes) {
+      const text = tn.nodeValue;
+      pattern.lastIndex = 0;
+      if (!pattern.test(text)) continue;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      let m;
+      pattern.lastIndex = 0;
+      while ((m = pattern.exec(text))) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const el = document.createElement('mark');
+        el.className = 'word mine';
+        el.dataset.hw = m[0].replace(/\s+/g, ' ');
+        el.dataset.tmp = '1'; // 只为了点词临时包的，取消收藏时要能拆回去
+        el.textContent = m[0];
+        frag.appendChild(el);
+        last = m.index + m[0].length;
+        count++;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      tn.parentNode.replaceChild(frag, tn);
+    }
+  }
+  return count;
+}
+
+/** 取消收藏时，把临时包出来的 <mark> 拆回纯文本（否则会留下黄色目标词样式） */
+function unwrapWordInPlace(word, lemma) {
+  const keys = [word, lemma].filter(Boolean).map((w) => String(w).toLowerCase());
+  if (!keys.length) return 0;
+  let count = 0;
+  $$('mark.word[data-tmp="1"]').forEach((el) => {
+    const hw = (el.dataset.hw || '').toLowerCase();
+    if (!keys.some((k) => hw === k || hw.startsWith(k) || k.startsWith(hw))) return;
+    unwrapOne(el);
+    count++;
+  });
+  return count;
+}
+
+function unwrapOne(el) {
+  const t = document.createTextNode(el.textContent);
+  el.parentNode.replaceChild(t, el);
+  t.parentNode?.normalize();
+}
+
+/** 一键清空生词本后把所有临时标记拆掉 */
+function unwrapAllTempMarks() {
+  $$('mark.word[data-tmp="1"]').forEach(unwrapOne);
+  $$('mark.word.mine').forEach((el) => el.classList.remove('mine'));
 }
 
 document.addEventListener('click', (e) => {
@@ -1025,7 +1094,7 @@ function bindTop() {
     if (!confirm(`确定清空生词本里的 ${state.marks.length} 个词？`)) return;
     const data = await api('/api/marks?all=1', { method: 'DELETE' });
     setMarks(data.marks);
-    $$('mark.word.mine').forEach((el) => el.classList.remove('mine'));
+    unwrapAllTempMarks();
     toast('生词本已清空');
   };
 }

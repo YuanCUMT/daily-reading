@@ -202,7 +202,7 @@ mark.word:hover { background: linear-gradient(transparent 45%, #ffd27a 45%); }
 mark.word.unknown { background: linear-gradient(transparent 58%, #dfe6ee 58%); font-weight: 500; }
 /* 自己收进生词本的词：淡蓝底 + 虚线下划线，和今天的黄底目标词区分开 */
 mark.word.mine {
-  background: linear-gradient(transparent 58%, #cfe3fb 58%);
+  background: linear-gradient(transparent 52%, #bfdcfb 52%);
   border-bottom: 1px dashed var(--blue);
 }
 
