@@ -115,6 +115,27 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     const gitignore = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
     check('.gitignore 排除了 data/（里面有 API Key）', /^data\/$/m.test(gitignore));
     check('start.cmd 指向 server.js', startCmd.toString('latin1').includes('node server.js'));
+    // start.cmd 不能自己写中文（见上方注释），但它要用 type 打出中文提示，
+    // 所以提示文本单独放在 UTF-8 .txt 里：必须无 BOM（否则 type 会把 BOM 打成乱码），
+    // 且必须真的是 UTF-8（cmd 在 chcp 65001 下按 UTF-8 解释这些字节）。
+    for (const [name, needle] of [
+      ['msg-no-node.txt', '没有找到 Node.js'],
+      ['msg-old-node.txt', '版本太旧'],
+    ]) {
+      const p = path.join(ROOT, 'tools', name);
+      const raw = fs.existsSync(p) ? fs.readFileSync(p) : Buffer.alloc(0);
+      check(`tools/${name} 存在且非空`, raw.length > 0);
+      check(
+        `tools/${name} 无 UTF-8 BOM`,
+        !(raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf)
+      );
+      let decoded = null;
+      try {
+        decoded = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+      } catch {}
+      check(`tools/${name} 是合法 UTF-8`, decoded !== null && decoded.includes(needle));
+      check(`start.cmd 会用 type 打出 ${name}`, startCmd.toString('latin1').includes(name));
+    }
 
     const { openBrowser } = require(path.join(ROOT, 'server.js'));
     const dry = openBrowser('http://127.0.0.1:1234', { dryRun: true });

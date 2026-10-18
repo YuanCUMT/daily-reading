@@ -120,7 +120,9 @@ daily-reading/
 ├─ server.js              本地 HTTP 服务 + API（零依赖）
 ├─ tools/
 │  ├─ make-icon.ps1       生成 icon.ico
-│  └─ install-shortcut.ps1 在桌面创建快捷方式
+│  ├─ install-shortcut.ps1 在桌面创建快捷方式
+│  ├─ msg-no-node.txt     没装 Node.js 时的中文提示（UTF-8 无 BOM）
+│  └─ msg-old-node.txt    Node.js 版本太旧时的中文提示
 ├─ docs/
 │  └─ screenshot-exam.png 界面截图（真题模式实拍）
 ├─ lib/
@@ -130,7 +132,7 @@ daily-reading/
 │  ├─ ocr.js              截图识别的 Node 封装 + 按字号挑词
 │  └─ ocr.ps1             调 Windows.Media.Ocr 的 PowerShell 脚本
 ├─ public/                前端（原生 HTML/CSS/JS，无需构建）
-├─ test/                  测试（98 + 62 项，用本地假模型）
+├─ test/                  测试（106 + 62 项，用本地假模型）
 └─ data/                  运行时自动创建，全部是明文 JSON
    ├─ config.json         API Key、文章偏好
    ├─ words/2026-10-17.json
@@ -144,13 +146,19 @@ daily-reading/
 ## 测试
 
 ```bash
-node test/e2e.js        # 后端端到端（98 项）：真 OCR + 假模型 + 真 HTTP
+node test/e2e.js        # 后端端到端（106 项）：真 OCR + 假模型 + 真 HTTP
 node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（62 项）并截图
 ```
 
 两个测试都用本地假模型，不消耗 token、不访问外网，也不会弹浏览器窗口。
 
 ## 常见问题
+
+**双击 `start.cmd` 弹出一屏中文提示说「没有找到 Node.js」**：就是字面意思，先装 Node.js。
+去 [nodejs.org](https://nodejs.org) 下载 LTS 版本，一路「下一步」，装完关掉窗口重新双击。
+如果装完还提示，重启一次电脑——新装的程序要让系统重新读取环境变量才认得到。
+
+**提示「Node.js 版本太旧」**：装的版本低于 18。去官网装最新 LTS 覆盖掉就行（程序用到了 18 才有的 `fetch`）。
 
 **启动时提示端口被占用**：说明已经开着一个了，程序会把浏览器指向已有实例。
 **改过代码之后一定要先关掉旧窗口再重启** —— Node 会把模块缓存在进程里，不然改动不生效。
@@ -178,8 +186,15 @@ node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（6
 **`start.cmd` 必须纯 ASCII + CRLF。** `cmd.exe` 是按 ANSI 代码页逐字节解析 `.cmd` 的，不是 UTF-8。
 文件里写中文再配 `chcp 65001`，会让 cmd 的文件位置指针错位，后面的行直接乱掉——
 曾经把 `echo` 吃成 `ho`、`node server.js` 吃成 `erver.js`，双击图标只闪一下报错就退出。
-只有 LF 换行则会让 `if (...)` 这类块级语法解析失败。所以中文提示全部由 `server.js` 打印。
-测试里有断言守着这两点。
+只有 LF 换行则会让 `if (...)` 这类块级语法解析失败。
+
+因此这个文件有两条约束同时成立：
+1. **不用 `if (...)` 块，改用 `goto` 标签。** 块语法只要遇到一行裸 LF 就炸；标签不受影响。
+2. **中文提示单独放 `tools/msg-*.txt`（UTF-8 无 BOM），由 `type` 打出来。**
+   `.cmd` 自己仍然一个中文都不能有，但用户在 `chcp 65001` 下看到的是中文。
+   注意不能带 BOM，否则 `type` 会把 `EF BB BF` 打成乱码。
+
+测试里有断言守着这些（ASCII、CRLF、两个提示文件的编码）。
 
 **`lib/ocr.ps1` 也必须纯 ASCII**，同理：PowerShell 5.1 按 ANSI 读 `.ps1`。
 
