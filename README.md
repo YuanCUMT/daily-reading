@@ -70,8 +70,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 **短语也能查**：在正文里按住鼠标**拖选**几个词（比如 `in terms of`、`take into account`），松手就弹浮层，
 会额外给出「搭配」结构，收藏按钮变成「☆ 收藏短语」，正文里整段短语一起变蓝。
 
-> 一次最多选 8 个词、60 个字符 —— 拖多了会提示「选得太长」。查词缓存的文件名把空格换成下划线
-> （`in terms of` → `dict/in_terms_of.json`），所以短语查一次也就只花一次钱。
+> 一次最多选 8 个词、60 个字符 —— 拖多了会提示「选得太长了」，跨段落拖会提示「一次只能查同一段」。
+> 拖出一行半（比如手滑带到了中文译文）不用重来：会自动把选区收回到本段末尾再查。
+> 查词缓存的文件名把空格换成下划线（`in terms of` → `dict/in_terms_of.json`），所以短语查一次也就只花一次钱。
+>
+> 这功能**不依赖鼠标事件**，监听的是选区变化（`selectionchange`）。原因是划词翻译、搜题一类的
+> 浏览器扩展经常把 `mouseup` 吞掉或者抢着改选区，用鼠标事件会出现「有时候框选没反应」。
 
 框选的效果长这样：[docs/screenshot-phrase.png](docs/screenshot-phrase.png)。
 
