@@ -592,6 +592,45 @@ function seed() {
     );
     check('短语也能从侧栏移除', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
 
+    // 选不合法的时候要说话，不能默默什么也不发生（这是用户报的「没反应」）
+    await cdp.eval(`(() => {
+      const p0 = document.querySelector('.para[data-para="0"] .en');
+      const p1 = document.querySelector('.para[data-para="1"] .en');
+      const r = document.createRange();
+      r.setStart(p0.firstChild, 0);
+      r.setEnd(p1.firstChild, 6);
+      const s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      return 'ok';
+    })()`);
+    await sleep(500);
+    const multiToast = await cdp.eval(`document.getElementById('toast').textContent`);
+    check('跨段框选给出提示而不是没反应', /同一段/.test(multiToast), multiToast);
+
+    await cdp.eval(`(() => {
+      const p = document.querySelector('.para[data-para="0"] .en');
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let n;
+      while ((n = walker.nextNode())) nodes.push(n);
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const r = document.createRange();
+      // "People often mention abandon when they talk about this." —— 9 个词，不带数字和小数点
+      r.setStart(first, first.nodeValue.indexOf('People'));
+      r.setEnd(last, last.nodeValue.indexOf('this.') + 5);
+      const s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      return 'ok';
+    })()`);
+    await sleep(500);
+    const longToast = await cdp.eval(`document.getElementById('toast').textContent`);
+    check('选太长时提示上限', /8 个词/.test(longToast), longToast);
+
+    await cdp.eval(`try { window.getSelection().removeAllRanges(); } catch {} 'ok'`);
+
     // 收尾：关掉浮层，留下一项生词本内容给截图用
     await cdp.eval(`document.getElementById('popover').hidden = true; 'ok'`);
 

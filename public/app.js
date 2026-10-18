@@ -20,14 +20,25 @@ const state = {
 
 // ------------------------------------------------------------------ 网络
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  const data = await res.json().catch(() => ({ ok: false, error: '返回内容无法解析' }));
-  if (!res.ok || data.ok === false) throw new Error(data.error || `请求失败 (${res.status})`);
-  return data;
+  const { timeoutMs, ...init } = options;
+  const ac = timeoutMs ? new AbortController() : null;
+  const timer = ac ? setTimeout(() => ac.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...init,
+      signal: ac?.signal,
+      body: init.body ? JSON.stringify(init.body) : undefined,
+    });
+    const data = await res.json().catch(() => ({ ok: false, error: '返回内容无法解析' }));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `请求失败 (${res.status})`);
+    return data;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`等了 ${Math.round(timeoutMs / 1000)} 秒还没回，网络或模型太慢了`);
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 let toastTimer;
@@ -486,28 +497,44 @@ function wordAtPoint(x, y) {
 /**
  * 把用户框选的文字当成短语来查。
  * 只在同一个段落（.en）内部生效 —— 跨段框选会把两句话拼在一起，那不是短语。
- * 返回 null 表示这次框选不该触发查词（选中的是译文、标点、或者长得离谱）。
+ * 返回 { phrase, host, rect } 表示可以查；
+ * 返回 { problem } 表示这次框选该查但被拒了（带原因，好给用户一句人话）；
+ * 返回 null 表示根本不是英文框选（选了译文、界面文字），安静忽略。
  */
 function selectionPhrase() {
   const sel = window.getSelection?.();
   if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
-  const raw = String(sel).replace(/\s+/g, ' ').trim();
-  if (!raw) return null;
 
-  const range = sel.getRangeAt(0);
+  let range = sel.getRangeAt(0);
   const toEl = (n) => (n?.nodeType === 3 ? n.parentElement : n);
   const startEl = toEl(range.startContainer);
-  const endEl = toEl(range.endContainer);
   const host = startEl?.closest?.('.en');
-  if (!host || !endEl || !host.contains(endEl)) return null;
+  if (!host) return null; // 选的是译文或界面文字，不归我们管
 
-  // 去掉两头的引号、标点；中英混选时只保留英文那一段
+  const endEl = toEl(range.endContainer);
+  if (endEl && endEl !== host && !host.contains(endEl)) {
+    if (endEl.closest?.('.en')) return { problem: 'multi-para' };
+    // 手滑拖出段落（拖进了中文译文、或者多拖了半行）是常事，
+    // 不该让整次框选白费：把选区截到本段末尾，视觉上也跟着收回来。
+    range = document.createRange();
+    range.setStart(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+    range.setEnd(host, host.childNodes.length);
+    try {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {}
+  }
+
+  const raw = String(sel).replace(/\s+/g, ' ').trim();
   const cleaned = raw.replace(/^[^A-Za-z]+/, '').replace(/[^A-Za-z'\-]+$/, '');
   if (!/^[A-Za-z][A-Za-z'\- ]*$/.test(cleaned)) return null;
-  const words = cleaned.split(' ').filter(Boolean);
-  if (!words.length || words.length > 8 || cleaned.length > 60) return null;
 
-  return { phrase: cleaned.toLowerCase(), host, wordCount: words.length };
+  const words = cleaned.split(' ').filter(Boolean);
+  if (!words.length) return null;
+  if (words.length > 8 || cleaned.length > 60) return { problem: 'too-long', wordCount: words.length };
+
+  const rect = (sel.rangeCount ? sel.getRangeAt(0) : range).getBoundingClientRect();
+  return { phrase: cleaned.toLowerCase(), host, wordCount: words.length, rect };
 }
 
 function getGlossary(key) {
@@ -535,7 +562,8 @@ async function openWord(x, y, word, anchorEl) {
   const sentence = anchorEl?.closest?.('.en')?.textContent || '';
   try {
     const data = await api(
-      `/api/lookup?word=${encodeURIComponent(key)}&context=${encodeURIComponent(sentence.slice(0, 400))}`
+      `/api/lookup?word=${encodeURIComponent(key)}&context=${encodeURIComponent(sentence.slice(0, 400))}`,
+      { timeoutMs: 25000 }
     );
     state.dictCache.set(key, data.entry);
     if ($('#popover').dataset.word === key) drawPopover(x, y, key, { entry: data.entry, cached: data.cached });
@@ -602,7 +630,7 @@ function popoverHtml(word, opts) {
 
   let body;
   if (loading) {
-    body = `${head}<p class="cn pop-loading">正在查${phrase ? '这个短语' : '这个词'}…</p>`;
+    body = `${head}<p class="cn pop-loading">正在查${phrase ? '这个短语' : '这个词'}……<span class="ph-hint">第一次查要等模型几秒，之后直接读缓存</span></p>`;
   } else if (error) {
     body = `${head}<p class="cn" style="color:var(--warn)">${esc(error)}</p>`;
   } else if (!cn) {
@@ -700,23 +728,55 @@ document.addEventListener('click', (e) => {
 });
 
 // 框选一段就是查短语 —— 单词靠点，短语靠拖。
-// 记录按下鼠标那一刻的选区，只有「这次新选出来的」才触发，否则点别处关浮层时会把旧选区又查一遍。
-let selAtMouseDown = '';
-document.addEventListener(
-  'mousedown',
-  () => {
-    selAtMouseDown = String(window.getSelection?.() || '');
-  },
-  true,
-);
-document.addEventListener('mouseup', (e) => {
-  if (e.target.closest?.('#popover')) return;
-  const now = String(window.getSelection?.() || '');
-  if (!now.trim() || now === selAtMouseDown) return;
+//
+// 触发用的是 selectionchange 而不是 mouseup/mouseend：
+// 划词翻译、搜题那类浏览器扩展会抢鼠标事件（有的直接 stopPropagation，
+// 有的在 mouseup 之后再把选区改一遍），用 mouseup 就会「有时候没反应」。
+// 选区本身是绕不过去的，只要它变了我们就能知道。
+// 拖选过程中 selectionchange 会连续触发，所以防抖到停手之后。
+let selTimer = null;
+let selWait = 0;
+let lastPhrase = '';
+let hintAt = 0;
+let hintText = '';
+
+// 鼠标还按着（用户可能只是拖过头了想退回来）就先别查，等松手。
+// 用 window 上的 pointerdown/pointerup 捕获阶段：划词扩展拦不住这一层。
+let pointerHeld = false;
+window.addEventListener('pointerdown', () => (pointerHeld = true), true);
+window.addEventListener('pointerup', () => (pointerHeld = false), true);
+window.addEventListener('pointercancel', () => (pointerHeld = false), true);
+
+function hintOnce(msg) {
+  if (msg === hintText && Date.now() - hintAt < 2500) return;
+  hintText = msg;
+  hintAt = Date.now();
+  toast(msg);
+}
+
+document.addEventListener('selectionchange', () => {
+  clearTimeout(selTimer);
+  selWait = 0;
+  selTimer = setTimeout(onSelectionSettled, 260);
+});
+
+function onSelectionSettled() {
+  // 拖选途中会反复触发，按着鼠标时只是拖过头而已，不要急着查
+  if (pointerHeld && selWait < 24) {
+    selWait += 1;
+    selTimer = setTimeout(onSelectionSettled, 150);
+    return;
+  }
   const hit = selectionPhrase();
   if (!hit) return;
-  openWord(e.clientX, e.clientY, hit.phrase, hit.host);
-});
+  if (hit.problem === 'multi-para') return hintOnce('一次只能查同一段里的短语');
+  if (hit.problem === 'too-long') return hintOnce('选得太长了，一次最多 8 个词');
+
+  const pop = $('#popover');
+  if (hit.phrase === lastPhrase && !pop.hidden && pop.dataset.word === hit.phrase) return;
+  lastPhrase = hit.phrase;
+  openWord(hit.rect.left, hit.rect.bottom + 4, hit.phrase, hit.host);
+}
 
 // ------------------------------------------------------------------ 生成
 async function generate() {

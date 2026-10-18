@@ -366,6 +366,7 @@ details.diag pre { background: var(--surface-2); border: 1px solid var(--line); 
 .popover a[data-mark].on { color: var(--accent); }
 .popover a[data-mark][disabled] { opacity: .5; pointer-events: none; }
 .popover .pop-loading { color: var(--ink-soft); }
+.popover .pop-loading .ph-hint { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-faint, var(--ink-soft)); }
 .popover.mini { padding: 8px 12px; }
 /* 短语和单词在浮层里长得不一样：加个绿色小标签，释义下面补一行搭配结构 */
 .popover .pos.phr { color: #2f6b45; border: 1px solid #cfe4d6; background: #f2f8f4; border-radius: 5px; padding: 0 5px; }
