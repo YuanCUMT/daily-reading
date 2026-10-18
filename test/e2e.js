@@ -403,6 +403,69 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     const tooMany = await json('/api/ocr', { method: 'POST', body: { images: new Array(20).fill('data:image/png;base64,AAA') } });
     check('图片过多时报错', tooMany.data.ok === false && tooMany.data.error.includes('12'));
 
+    // ---- 9b. 划词查词：查的不是今天的词，而是文章里的生词 ----
+    const lookupPrompt = require(path.join(ROOT, 'lib', 'prompt.js')).buildLookupPrompt(
+      'borrowed',
+      'He borrowed a book from me.'
+    );
+    check('查词提示词要求给原形', /原形/.test(lookupPrompt.user) && /borrowed/.test(lookupPrompt.user));
+    check('查词提示词带上了上下文', lookupPrompt.user.includes('He borrowed a book from me.'));
+
+    const look1 = await json('/api/lookup?word=borrowed&context=' + encodeURIComponent('He borrowed a book from me.'));
+    check('查词成功', look1.data.ok === true && !!look1.data.entry, JSON.stringify(look1.data).slice(0, 160));
+    check('查词返回了原形（不是用户点的变形）', look1.data.entry.word === 'borrow', look1.data.entry?.word);
+    check('查词返回中文释义', look1.data.entry.cn.includes('中文释义'));
+    check('第一次查词是走模型（未命中缓存）', look1.data.cached === false);
+
+    const look2 = await json('/api/lookup?word=borrowed');
+    check('第二次查同一个词命中缓存', look2.data.cached === true);
+    check('词典缓存已落盘', fs.existsSync(path.join(DATA, 'dict', 'borrowed.json')));
+
+    const st0 = await json('/api/state?date=2026-10-16');
+    check('state 里能看到词典缓存条数', st0.data.dictCount === 1, String(st0.data.dictCount));
+
+    const noKeyDate = await json('/api/lookup');
+    check('查词缺少 word 参数时报错', noKeyDate.data.ok === false && /缺少/.test(noKeyDate.data.error));
+
+    // ---- 9c. 自定义标记（生词本）----
+    const mk1 = await json('/api/marks', { method: 'POST', body: { word: 'borrowed', lemma: 'borrow', cn: '借' } });
+    check('收藏生词成功', mk1.data.ok === true && mk1.data.marks.length === 1);
+    check('收藏记录了原形和释义', mk1.data.marks[0].lemma === 'borrow' && mk1.data.marks[0].cn === '借');
+
+    const mk2 = await json('/api/marks', { method: 'POST', body: { word: 'Borrowed' } });
+    check('重复收藏不会产生两条', mk2.data.marks.length === 1, `实际 ${mk2.data.marks.length}`);
+
+    // 这是功能的核心：词表里根本没有的词也要能收
+    const mk3 = await json('/api/marks', { method: 'POST', body: { word: 'sanction' } });
+    check('可以收藏今天的词表里没有的词', mk3.data.marks.length === 2);
+    check('生词落盘', fs.existsSync(path.join(DATA, 'marks.json')));
+
+    const st1 = await json('/api/state?date=2026-10-16');
+    // 新加的排前面，方便刚收完就能看到
+    check(
+      'state 带上了生词本（新的在前）',
+      st1.data.marks.length === 2 &&
+        st1.data.marks[0].word === 'sanction' &&
+        st1.data.marks[1].word === 'borrowed',
+      JSON.stringify(st1.data.marks.map((m) => m.word))
+    );
+
+    const mkRm = await json('/api/marks?word=sanction', { method: 'DELETE' });
+    check('能单独删掉一个生词', mkRm.data.marks.length === 1 && mkRm.data.marks[0].word === 'borrowed');
+
+    const dictClear = await json('/api/dict', { method: 'DELETE' });
+    check('能清空词典缓存', dictClear.data.dictCount === 0);
+    const look3 = await json('/api/lookup?word=borrowed');
+    check('清缓存后重新查会再走模型', look3.data.cached === false);
+
+    const mkAll = await json('/api/marks?all=1', { method: 'DELETE' });
+    check('能一键清空生词本', mkAll.data.marks.length === 0);
+
+    // ---- 9d. 没配 Key 时查词的提示要能看懂 ----
+    await json('/api/config', { method: 'POST', body: { deepseek: { clearKey: true } } });
+    const noKey = await json('/api/lookup?word=sanction');
+    check('没配 Key 时查词给出中文提示', noKey.data.ok === false && /API Key/.test(noKey.data.error), noKey.data.error);
+
     // ---- 10. 删除 ----
     const del = await json('/api/article?date=2026-10-16', { method: 'DELETE' });
     check('删除成功', del.data.deleted === true);

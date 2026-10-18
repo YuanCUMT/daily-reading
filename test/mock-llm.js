@@ -36,6 +36,36 @@ const server = http.createServer((req, res) => {
     const parsed = JSON.parse(body || '{}');
     const user = parsed.messages?.find((m) => m.role === 'user')?.content || '';
     const isOcrFix = user.includes('OCR 出来的候选英文单词');
+    const isLookup = user.includes('读者在文章中点了这个词');
+
+    // 划词查词：返回固定假释义；lemma 去掉常见后缀，用来验证前端显示的是原形
+    if (isLookup) {
+      const word = (user.match(/^单词：(.+)$/m) || [])[1]?.trim() || 'word';
+      const lemma = word.replace(/(ies|ied|ing|ed|es|s)$/i, '') || word;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          model: parsed.model || 'mock',
+          usage: { prompt_tokens: 50, completion_tokens: 60 },
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  word: lemma,
+                  phonetic: `/${lemma.toLowerCase()}/`,
+                  pos: 'n.',
+                  cn: `${lemma} 的中文释义（查询测试）`,
+                  examSense: '',
+                  example: `They talked about ${lemma} for a while.`,
+                  note: '',
+                }),
+              },
+            },
+          ],
+        })
+      );
+      return;
+    }
 
     // OCR 校正请求：把 cautlous 改回 cautious，并丢掉界面词
     if (isOcrFix) {

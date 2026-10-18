@@ -13,6 +13,7 @@ const { URL } = require('node:url');
 const store = require('./lib/store');
 const { runOcr, extractWords, saveDataUrl } = require('./lib/ocr');
 const { generateArticle, cleanOcrWords } = require('./lib/deepseek');
+const { lookupWord } = require('./lib/dict');
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = '127.0.0.1';
@@ -190,6 +191,8 @@ async function handleApi(req, res, url) {
       dates: store.listArticles(),
       words: store.loadWords(date),
       article: store.loadArticle(date),
+      marks: store.loadMarks().marks,
+      dictCount: store.dictCount(),
     });
   }
 
@@ -390,6 +393,62 @@ async function handleApi(req, res, url) {
   if (p === '/api/article' && req.method === 'DELETE') {
     const date = store.normalizeDate(url.searchParams.get('date'));
     return ok(res, { deleted: store.deleteArticle(date) });
+  }
+
+  // ---- 划词查词 ----
+  if (p === '/api/lookup' && req.method === 'GET') {
+    const word = url.searchParams.get('word') || '';
+    const context = url.searchParams.get('context') || '';
+    if (!word.trim()) return fail(res, '缺少 word 参数');
+    try {
+      const { entry, cached } = await lookupWord({
+        config: cfg,
+        word,
+        context,
+        refresh: url.searchParams.get('refresh') === '1',
+      });
+      return ok(res, { entry, cached, hasKey: Boolean(cfg.deepseek.apiKey) });
+    } catch (e) {
+      // NO_KEY / BAD_WORD 是用户能自己解决的情况，别报成 500
+      const status = e.code === 'NO_KEY' ? 400 : e.code === 'BAD_WORD' ? 400 : 500;
+      return fail(res, e.message || String(e), status, { code: e.code || 'LOOKUP_FAILED' });
+    }
+  }
+
+  // ---- 查词缓存 ----
+  if (p === '/api/dict' && req.method === 'DELETE') {
+    return ok(res, { dictCount: store.clearDict() });
+  }
+
+  // ---- 生词本 ----
+  if (p === '/api/marks' && req.method === 'GET') {
+    return ok(res, { marks: store.loadMarks().marks });
+  }
+
+  if (p === '/api/marks' && req.method === 'POST') {
+    const body = await readBody(req);
+    const word = String(body.word || '').trim();
+    if (!word) return fail(res, '单词为空');
+    const saved = store.addMark({
+      word,
+      lemma: String(body.lemma || '').trim() || undefined,
+      phonetic: String(body.phonetic || '').trim(),
+      pos: String(body.pos || '').trim(),
+      cn: String(body.cn || '').trim(),
+      examSense: String(body.examSense || '').trim(),
+      note: String(body.note || '').trim(),
+      articleDate: body.articleDate ? store.normalizeDate(body.articleDate) : undefined,
+    });
+    return ok(res, saved);
+  }
+
+  if (p === '/api/marks' && req.method === 'DELETE') {
+    if (url.searchParams.get('all') === '1') {
+      return ok(res, store.saveMarks({ marks: [] }));
+    }
+    const word = url.searchParams.get('word') || '';
+    if (!word.trim()) return fail(res, '缺少 word 参数');
+    return ok(res, store.removeMark(word));
   }
 
   if (p === '/api/parse-words' && req.method === 'POST') {

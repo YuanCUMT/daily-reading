@@ -21,6 +21,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'bcz-ui-test-'));
 const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'bcz-ui-prof-'));
 const SHOT = path.join(ROOT, 'test', 'screenshot.png');
 const SHOT_SETTINGS = path.join(ROOT, 'test', 'screenshot-settings.png');
+const SHOT_LOOKUP = path.join(ROOT, 'test', 'screenshot-lookup.png');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 
 const EDGE = [
@@ -392,6 +393,94 @@ function seed() {
     await cdp.eval(`document.querySelector('mark.word').click(); 'ok'`);
     await sleep(300);
     check('点单词弹出释义浮层', (await cdp.eval(`!document.getElementById('popover').hidden`)) === true);
+
+    // ---------- 划词查词 + 生词本 ----------
+    check('侧栏有生词本面板', (await cdp.eval(`!!document.getElementById('markList')`)) === true);
+
+    // 点正文里一个「不是今天目标词」的生词 —— 这才是查词功能真正的用处
+    const clickedWord = await cdp.eval(`(() => {
+      try { window.getSelection().removeAllRanges(); } catch {}
+      const p = document.querySelector('.para[data-para="0"] .en');
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      let node, hit = null;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement.closest('mark.word')) continue;
+        const i = node.nodeValue.toLowerCase().indexOf('paragraph');
+        if (i >= 0) { hit = { node, i }; break; }
+      }
+      if (!hit) return 'notfound';
+      const r = document.createRange();
+      r.setStart(hit.node, hit.i);
+      r.setEnd(hit.node, hit.i + 'paragraph'.length);
+      const rect = r.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      document.querySelector('#articleView').dispatchEvent(
+        new MouseEvent('click', { clientX: x, clientY: y, bubbles: true, cancelable: true })
+      );
+      return 'clicked';
+    })()`);
+    check('能在正文里点到非目标词', clickedWord === 'clicked', clickedWord);
+
+    await waitFor(
+      () => cdp.eval(`(document.querySelector('#popover .cn')?.textContent || '').includes('查询测试')`),
+      { label: '划词查词结果' }
+    );
+    const lookupPop = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        word: document.getElementById('popover').dataset.word,
+        cn: document.querySelector('#popover .cn')?.textContent || '',
+        hasMark: !!document.querySelector('#popover [data-mark]'),
+        hidden: document.getElementById('popover').hidden
+      })`)
+    );
+    // 曾经的 bug：正文点击冒泡到 document，浮层刚打开就被关掉
+    check('点非目标词也能查，浮层没被关掉', lookupPop.hidden === false && lookupPop.word === 'paragraph', JSON.stringify(lookupPop));
+    check('查到的释义来自模型', lookupPop.cn.includes('paragraph 的中文释义'), lookupPop.cn);
+    check('浮层里有收藏按钮', lookupPop.hasMark === true);
+
+    await sleep(150);
+    const shotLookup = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(SHOT_LOOKUP, Buffer.from(shotLookup.data, 'base64'));
+    check('划词浮层截图已保存', fs.existsSync(SHOT_LOOKUP) && fs.statSync(SHOT_LOOKUP).size > 10000);
+
+    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '收藏入生词本' });
+    const marks1 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        n: document.querySelectorAll('#markList .mark-chip').length,
+        word: document.querySelector('#markList .mark-chip .w')?.textContent,
+        cn: document.querySelector('#markList .mark-chip .m')?.textContent,
+        btn: document.querySelector('#popover [data-mark]')?.textContent || '',
+        count: document.getElementById('markCount').textContent
+      })`)
+    );
+    check('收藏后生词本里有这个词', marks1.n === 1 && marks1.word === 'paragraph', JSON.stringify(marks1));
+    check('生词本记住了释义', marks1.cn.includes('中文释义'), marks1.cn);
+    check('收藏后按钮变成「已在生词本」', marks1.btn.includes('已在生词本'), marks1.btn);
+    check('生词本计数同步', marks1.count === '1', marks1.count);
+
+    // 标一个今日目标词：正文里应该从黄底变成「生词本」样式
+    await cdp.eval(`document.querySelector('mark.word').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层' });
+    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('mark.word.mine').length > 0`), { label: '目标词变成生词本样式' });
+    const marks2 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        chips: document.querySelectorAll('#markList .mark-chip').length,
+        mine: document.querySelectorAll('mark.word.mine').length
+      })`)
+    );
+    check('生词本里现在有两项', marks2.chips === 2, JSON.stringify(marks2));
+    check('标过的目标词在正文里换了样式', marks2.mine > 0, JSON.stringify(marks2));
+
+    // 从侧栏移除一个
+    await cdp.eval(`document.querySelector('#markList .mark-chip [data-rm]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '移出生词本' });
+    check('能从侧栏把词移出生词本', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
+
+    // 收尾：关掉浮层，留下一项生词本内容给截图用
+    await cdp.eval(`document.getElementById('popover').hidden = true; 'ok'`);
 
     // 交互：做题
     await cdp.eval(`document.querySelector('.q .opt').click(); 'ok'`);

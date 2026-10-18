@@ -108,6 +108,27 @@ input[type="date"] {
 .word-chip .w { font-family: var(--serif); font-size: 15px; font-weight: 600; }
 .word-chip .m { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------------- 生词本 ---------------- */
+.mark-list { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow: auto; }
+.mark-chip {
+  display: flex; align-items: baseline; gap: 8px; position: relative;
+  padding: 5px 22px 5px 8px; border-radius: 8px; cursor: pointer; border: none; background: none;
+  text-align: left; width: 100%;
+}
+.mark-chip:hover { background: var(--surface-2); }
+.mark-chip .w { font-family: var(--serif); font-size: 15px; font-weight: 600; }
+.mark-chip .m {
+  font-size: 12px; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mark-chip .rm {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; line-height: 15px; text-align: center;
+  border-radius: 50%; font-size: 10px; color: var(--ink-soft); opacity: 0;
+}
+.mark-chip:hover .rm { opacity: 1; }
+.mark-chip .rm:hover { background: var(--accent-soft); color: var(--accent); }
+
 /* ---------------- 归档 ---------------- */
 .archive { display: flex; flex-direction: column; gap: 2px; max-height: 34vh; overflow: auto; }
 .archive-item {
@@ -179,6 +200,11 @@ mark.word {
 }
 mark.word:hover { background: linear-gradient(transparent 45%, #ffd27a 45%); }
 mark.word.unknown { background: linear-gradient(transparent 58%, #dfe6ee 58%); font-weight: 500; }
+/* 自己收进生词本的词：淡蓝底 + 虚线下划线，和今天的黄底目标词区分开 */
+mark.word.mine {
+  background: linear-gradient(transparent 58%, #cfe3fb 58%);
+  border-bottom: 1px dashed var(--blue);
+}
 
 /* ---------------- 词汇表 ---------------- */
 .section { margin-top: 34px; }
@@ -332,6 +358,11 @@ details.diag pre { background: var(--surface-2); border: 1px solid var(--line); 
 .popover .ctx { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-soft); font-family: var(--serif); }
 .popover .links { margin-top: 10px; display: flex; gap: 10px; font-size: 12px; }
 .popover a { color: var(--blue); }
+.popover a[data-mark] { margin-left: auto; color: var(--ink-soft); }
+.popover a[data-mark].on { color: var(--accent); }
+.popover a[data-mark][disabled] { opacity: .5; pointer-events: none; }
+.popover .pop-loading { color: var(--ink-soft); }
+.popover.mini { padding: 8px 12px; }
 
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);

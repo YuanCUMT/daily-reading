@@ -58,6 +58,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 - **清空**：侧栏「今日单词」右上角（只清单词，已生成的文章不受影响）。
 - **回看**：每篇文章存成 `data/articles/日期.json`，左侧「历史文章」随时翻。
 
+## 阅读时查词 + 我的生词
+
+读文章时总有些词不是今天的作业词但也不认识。**点正文里任意单词**就弹出浮层，不用复制去别处搜。
+
+- 今天的词表里的词，直接拿词汇卡上的释义，**不花额度**
+- 别的词才会调一次模型查；查过的存进 `data/dict/`，再点就命中缓存，**同一个词只花一次钱**
+- 浮层里有音标、词性、中文释义、例句，还能点 🔊 朗读、跳剑桥词典
+- 点「☆ 收藏」收进侧栏的**我的生词**
+
+正文里的高亮分两种：**黄色**是今天要背的目标词，**蓝色虚线下划线**是你自己收进生词本的词。
+生词本存在 `data/marks.json`，可以单独移出，也可以一键清空；查词缓存可以在设置里清（换了模型、觉得释义不对时用）。
+
 ## 两种文章模式
 
 顶栏日期右边有个下拉框，一键切换；也可以在设置里改。
@@ -127,14 +139,17 @@ daily-reading/
 │  └─ screenshot-exam.png 界面截图（真题模式实拍）
 ├─ lib/
 │  ├─ store.js            data/ 目录的读写
+│  ├─ dict.js             划词查词：查缓存 → 调模型 → 写缓存
 │  ├─ prompt.js           考研向提示词 + 模型输出校验
 │  ├─ deepseek.js         DeepSeek（OpenAI 兼容）调用
 │  ├─ ocr.js              截图识别的 Node 封装 + 按字号挑词
 │  └─ ocr.ps1             调 Windows.Media.Ocr 的 PowerShell 脚本
 ├─ public/                前端（原生 HTML/CSS/JS，无需构建）
-├─ test/                  测试（106 + 62 项，用本地假模型）
+├─ test/                  测试（127 + 75 项，用本地假模型）
 └─ data/                  运行时自动创建，全部是明文 JSON
    ├─ config.json         API Key、文章偏好
+   ├─ marks.json          我的生词本
+   ├─ dict/               查词缓存（一个词一个文件）
    ├─ words/2026-10-17.json
    └─ articles/2026-10-17.json
 ```
@@ -146,8 +161,8 @@ daily-reading/
 ## 测试
 
 ```bash
-node test/e2e.js        # 后端端到端（106 项）：真 OCR + 假模型 + 真 HTTP
-node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（62 项）并截图
+node test/e2e.js        # 后端端到端（127 项）：真 OCR + 假模型 + 真 HTTP
+node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（75 项）并截图
 ```
 
 两个测试都用本地假模型，不消耗 token、不访问外网，也不会弹浏览器窗口。

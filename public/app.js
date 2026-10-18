@@ -11,9 +11,11 @@ const state = {
   dates: [],
   words: null,
   article: null,
+  marks: [], // 生词本（服务端持久化）
+  marksSet: new Set(), // 小写词 → 快速判断「这个词标过吗」
+  dictCache: new Map(), // 本次会话已经查过的词，省一次请求
   images: [], // 待识别的截图 [{name, dataUrl}]
   candidates: [], // 识别出来的候选词
-  starred: new Set(JSON.parse(localStorage.getItem('starred') || '[]')),
 };
 
 // ------------------------------------------------------------------ 网络
@@ -54,13 +56,50 @@ async function load(date) {
   state.dates = data.dates;
   state.words = data.words;
   state.article = data.article;
+  setMarks(data.marks || []);
   $('#datePicker').value = state.date;
   renderAll();
+  migrateOldStars();
+}
+
+/** 生词本列表变化后，同步集合与侧栏 */
+function setMarks(list) {
+  state.marks = Array.isArray(list) ? list : [];
+  state.marksSet = new Set();
+  for (const m of state.marks) {
+    if (m.word) state.marksSet.add(String(m.word).toLowerCase());
+    if (m.lemma) state.marksSet.add(String(m.lemma).toLowerCase());
+  }
+  renderMarks();
+}
+
+/** 旧版本把「收藏」存在 localStorage 里，只存了单词没有释义 —— 迁移到服务端生词本 */
+async function migrateOldStars() {
+  let old = [];
+  try {
+    old = JSON.parse(localStorage.getItem('starred') || '[]');
+  } catch {
+    old = [];
+  }
+  if (!Array.isArray(old) || !old.length) return;
+  localStorage.removeItem('starred');
+  const known = new Set(state.marks.map((m) => m.word));
+  for (const w of old) {
+    if (!w || known.has(String(w).toLowerCase())) continue;
+    try {
+      await api('/api/marks', { method: 'POST', body: { word: w, articleDate: state.date } });
+    } catch {
+      /* 迁移失败不打扰用户 */
+    }
+  }
+  const fresh = await api('/api/marks').catch(() => null);
+  if (fresh) setMarks(fresh.marks);
 }
 
 function renderAll() {
   renderWords();
   renderArchive();
+  renderMarks();
   renderArticle();
   $('#btnGenerate').disabled = !(state.words?.words?.length);
   const mode = state.config?.prefs?.mode === 'exam' ? 'exam' : 'review';
@@ -101,6 +140,27 @@ function renderArchive() {
     .join('');
 }
 
+function renderMarks() {
+  const box = $('#markList');
+  const n = state.marks.length;
+  $('#markCount').textContent = n;
+  $('#btnClearMarks').disabled = !n;
+  if (!n) {
+    box.innerHTML =
+      '<p class="tip" style="margin:0">阅读时点任意单词就能查意思，点「☆ 收藏」收进这里。</p>';
+    return;
+  }
+  box.innerHTML = state.marks
+    .map(
+      (m) => `<button class="mark-chip" data-word="${esc(m.word)}">
+        <span class="w">${esc(m.word)}</span>
+        <span class="m">${esc(m.cn || m.note || m.phonetic || '')}</span>
+        <span class="rm" data-rm="${esc(m.word)}" title="移出生词本">✕</span>
+      </button>`
+    )
+    .join('');
+}
+
 function renderArticle() {
   const a = state.article;
   const empty = $('#empty');
@@ -118,7 +178,7 @@ function renderArticle() {
   view.hidden = false;
 
   const glossaryMap = new Map(a.glossary.map((g) => [g.word.toLowerCase(), g]));
-  const pattern = buildWordPattern(a.glossary);
+  const pattern = buildWordPattern(a.glossary, state.marks.map((m) => m.word));
 
   const usedCount = (a.usedWords || a.words || []).length;
   const totalCount = a.totalWords || usedCount;
@@ -218,9 +278,15 @@ function renderArticle() {
   bindArticleEvents(glossaryMap, a);
 }
 
-/** 构造目标词正则：支持常见变形 */
-function buildWordPattern(glossary) {
-  const stems = [...new Set(glossary.map((g) => String(g.word).toLowerCase()).filter((w) => /^[a-z][a-z'\- ]*$/.test(w)))];
+/** 构造高亮正则：目标词 + 生词本里的词，都支持常见变形 */
+function buildWordPattern(glossary, extraWords = []) {
+  const stems = [
+    ...new Set(
+      [...(glossary || []).map((g) => String(g.word).toLowerCase()), ...extraWords.map((w) => String(w).toLowerCase())].filter(
+        (w) => /^[a-z][a-z'\- ]*$/.test(w)
+      )
+    ),
+  ];
   if (!stems.length) return null;
   const alts = stems
     .sort((a, b) => b.length - a.length)
@@ -232,10 +298,65 @@ function buildWordPattern(glossary) {
 function highlight(text, pattern) {
   const safe = esc(text);
   if (!pattern) return safe;
-  return safe.replace(pattern, (m) => `<mark class="word" data-hw="${esc(m.replace(/\s+/g, ' '))}">${m}</mark>`);
+  return safe.replace(pattern, (m) => {
+    // 生词本里的词用另一种样式，和今日目标词区分开
+    const marked = state.marksSet.has(m.toLowerCase().replace(/\s+/g, ' '));
+    return `<mark class="word${marked ? ' mine' : ''}" data-hw="${esc(m.replace(/\s+/g, ' '))}">${m}</mark>`;
+  });
 }
 
 // ------------------------------------------------------------------ 文章内事件
+/** 正文区的点击处理。只绑一次（见 bindTop），内部从 state 取当前文章 */
+function onArticleClick(e) {
+  const a = state.article;
+  if (!a) return;
+
+  const speakBtn = e.target.closest('[data-speak]');
+  if (speakBtn) {
+    const i = Number(speakBtn.dataset.speak);
+    speak(a.paragraphs[i].en, $(`.para[data-para="${i}"]`));
+    return;
+  }
+  const lsSpeak = e.target.closest('[data-ls-speak]');
+  if (lsSpeak) {
+    speak(a.longSentences[Number(lsSpeak.dataset.lsSpeak)].en);
+    return;
+  }
+  const mark = e.target.closest('mark.word');
+  if (mark) {
+    const key = mark.dataset.hw.toLowerCase().replace(/[^a-z'\- ]/g, '').trim();
+    openWord(e.clientX, e.clientY, key, mark);
+    // 别再冒泡到 document 的「点别处关闭浮层」处理器，否则刚开的浮层会被立刻关掉
+    e.stopPropagation();
+    return;
+  }
+  // 正文里任意单词都能点 —— 目标词以外的生词才是阅读时真正卡住的地方
+  const hit = wordAtPoint(e.clientX, e.clientY);
+  if (hit) {
+    openWord(e.clientX, e.clientY, hit.word, hit.el);
+    e.stopPropagation();
+    return;
+  }
+  const opt = e.target.closest('.opt');
+  if (opt) {
+    const box = opt.closest('.q');
+    const q = a.questions[Number(box.dataset.q)];
+    $$('.opt', box).forEach((b, i) => {
+      b.classList.remove('correct', 'wrong');
+      if (i === q.answer) b.classList.add('correct');
+    });
+    if (Number(opt.dataset.opt) !== q.answer) opt.classList.add('wrong');
+    const ans = $('.answer-box', box);
+    if (ans) ans.hidden = false;
+    return;
+  }
+  const card = e.target.closest('.gcard');
+  if (card) {
+    if (e.target.closest('.say')) speak(card.dataset.word);
+    else openWord(e.clientX, e.clientY, card.dataset.word, card);
+  }
+}
+
 function bindArticleEvents(glossaryMap, a) {
   $('#chkZh')?.addEventListener('change', (e) => {
     localStorage.setItem('showZh', e.target.checked ? '1' : '0');
@@ -282,48 +403,10 @@ function bindArticleEvents(glossaryMap, a) {
     }
   });
 
-  $('#articleView').addEventListener('click', (e) => {
-    const speakBtn = e.target.closest('[data-speak]');
-    if (speakBtn) {
-      const i = Number(speakBtn.dataset.speak);
-      speak(a.paragraphs[i].en, $(`.para[data-para="${i}"]`));
-      return;
-    }
-    const lsSpeak = e.target.closest('[data-ls-speak]');
-    if (lsSpeak) {
-      speak(a.longSentences[Number(lsSpeak.dataset.lsSpeak)].en);
-      return;
-    }
-    const mark = e.target.closest('mark.word');
-    if (mark) {
-      const key = mark.dataset.hw.toLowerCase().replace(/[^a-z'\- ]/g, '');
-      showPopover(mark, glossaryMap.get(key) || findGlossary(glossaryMap, key), key, e.clientX, e.clientY);
-      return;
-    }
-    const opt = e.target.closest('.opt');
-    if (opt) {
-      const box = opt.closest('.q');
-      const q = a.questions[Number(box.dataset.q)];
-      $$('.opt', box).forEach((b, i) => {
-        b.classList.remove('correct', 'wrong');
-        if (i === q.answer) b.classList.add('correct');
-      });
-      if (Number(opt.dataset.opt) !== q.answer) opt.classList.add('wrong');
-      const ans = $('.answer-box', box);
-      if (ans) ans.hidden = false;
-      return;
-    }
-    const card = e.target.closest('.gcard');
-    if (card) {
-      if (e.target.closest('.say')) speak(card.dataset.word);
-      else showPopover(card, glossaryMap.get(card.dataset.word.toLowerCase()), card.dataset.word, e.clientX, e.clientY);
-    }
-  });
+  // 注：#articleView / #wordList / #markList 的点击处理绑在 bindTop() 里只绑一次。
+  // 这里如果每渲染一次就 addEventListener，会叠出一堆重复处理器（一次点击查好几次词）。
 
-  $('#wordList').onclick = (e) => {
-    const chip = e.target.closest('.word-chip');
-    if (chip) showPopover(chip, glossaryMap.get(chip.dataset.word.toLowerCase()), chip.dataset.word, e.clientX, e.clientY);
-  };
+  state.glossaryMap = glossaryMap;
 }
 
 function findGlossary(map, key) {
@@ -362,47 +445,191 @@ function speakAll(a) {
   });
 }
 
-// ------------------------------------------------------------------ 浮层
-function showPopover(anchor, g, word, x, y) {
-  const pop = $('#popover');
-  const body = g
-    ? `<div><span class="w">${esc(g.word)}</span>${g.phonetic ? `<span class="ph">${esc(g.phonetic)}</span>` : ''}${
-        g.pos ? `<span class="pos">${esc(g.pos)}</span>` : ''
-      }</div>
-       <p class="cn">${esc(g.cn)}</p>
-       ${g.examSense ? `<p class="exam-sense">考研常考：${esc(g.examSense)}</p>` : ''}
-       ${g.context ? `<p class="ctx">${esc(g.context)}</p>` : ''}`
-    : `<div><span class="w">${esc(word)}</span></div><p class="cn" style="color:var(--ink-soft)">这个词不在今天的词表里。</p>`;
+// ------------------------------------------------------------------ 划词查词
+/** 取光标下的英文单词。只认正文 .en 里的文字，避免把译文/界面文字也当成词 */
+function wordAtPoint(x, y) {
+  const sel = window.getSelection?.();
+  if (sel && String(sel).trim()) return null; // 用户正在选词，别抢
+  const range = document.caretRangeFromPoint?.(x, y);
+  if (!range) return null;
+  const node = range.startContainer;
+  if (!node || node.nodeType !== 3) return null;
+  const el = node.parentElement;
+  if (!el || !el.closest('.en')) return null;
+  const text = node.data;
+  const isW = (ch) => !!ch && /[A-Za-z'\-]/.test(ch);
+  let s = range.startOffset;
+  let e = range.startOffset;
+  if (!isW(text[s]) && !isW(text[s - 1])) return null;
+  while (s > 0 && isW(text[s - 1])) s--;
+  while (e < text.length && isW(text[e])) e++;
+  const raw = text
+    .slice(s, e)
+    .replace(/^['\-]+/, '')
+    .replace(/['\-]+$/, '');
+  if (!/^[A-Za-z][A-Za-z'\-]{0,40}$/.test(raw)) return null;
+  return { word: raw, el, sentence: el.textContent };
+}
 
-  pop.innerHTML = `${body}
-    <div class="links">
-      <a href="#" data-say>🔊 朗读</a>
-      <a href="https://dictionary.cambridge.org/dictionary/english/${encodeURIComponent(word)}" target="_blank" rel="noreferrer">剑桥词典</a>
-      <a href="#" data-star>${state.starred.has(word.toLowerCase()) ? '★ 已收藏' : '☆ 收藏生词'}</a>
-    </div>`;
+function getGlossary(key) {
+  const map = state.glossaryMap;
+  if (!map) return null;
+  return map.get(key) || findGlossary(map, key);
+}
+
+const isMarked = (word) => state.marksSet.has(String(word || '').toLowerCase());
+
+/**
+ * 打开某个词的浮层。顺序：今日词表（免费即时）→ 本次会话缓存 → 本地缓存 → 模型查。
+ */
+async function openWord(x, y, word, anchorEl) {
+  const key = String(word || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!key) return;
+
+  const g = getGlossary(key);
+  if (g) return drawPopover(x, y, key, { g });
+
+  const memo = state.dictCache.get(key);
+  if (memo) return drawPopover(x, y, key, { entry: memo });
+
+  drawPopover(x, y, key, { loading: true });
+  const sentence = anchorEl?.closest?.('.en')?.textContent || '';
+  try {
+    const data = await api(
+      `/api/lookup?word=${encodeURIComponent(key)}&context=${encodeURIComponent(sentence.slice(0, 400))}`
+    );
+    state.dictCache.set(key, data.entry);
+    if ($('#popover').dataset.word === key) drawPopover(x, y, key, { entry: data.entry, cached: data.cached });
+  } catch (err) {
+    if ($('#popover').dataset.word === key) drawPopover(x, y, key, { error: err.message });
+  }
+}
+
+function drawPopover(x, y, word, opts) {
+  const pop = $('#popover');
+  pop.dataset.word = word;
+  pop.innerHTML = popoverHtml(word, opts);
   pop.hidden = false;
 
   const rect = pop.getBoundingClientRect();
   pop.style.left = `${Math.min(Math.max(12, x - 40), window.innerWidth - rect.width - 12)}px`;
   pop.style.top = `${y + rect.height + 24 > window.innerHeight ? Math.max(12, y - rect.height - 12) : y + 14}px`;
 
-  $('[data-say]', pop).onclick = (e) => {
+  const target = opts.g?.word || opts.entry?.word || word;
+  $('[data-say]', pop)?.addEventListener('click', (e) => {
     e.preventDefault();
-    speak(g?.word || word);
-  };
-  $('[data-star]', pop).onclick = (e) => {
+    speak(target);
+  });
+  $('[data-mark]', pop)?.addEventListener('click', async (e) => {
     e.preventDefault();
-    const k = word.toLowerCase();
-    state.starred.has(k) ? state.starred.delete(k) : state.starred.add(k);
-    localStorage.setItem('starred', JSON.stringify([...state.starred]));
-    e.target.textContent = state.starred.has(k) ? '★ 已收藏' : '☆ 收藏生词';
-  };
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      if (isMarked(word) || isMarked(opts.g?.word) || isMarked(opts.entry?.word)) {
+        await unmarkWord(word, opts.g?.word || opts.entry?.word);
+        btn.textContent = '☆ 收藏';
+      } else {
+        await markWord(word, opts.g || opts.entry, opts.entry);
+        btn.textContent = '★ 已在生词本';
+      }
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+function popoverHtml(word, opts) {
+  const { g, entry, loading, error } = opts;
+  const w = g?.word || entry?.word || word;
+  const phonetic = g?.phonetic || entry?.phonetic || '';
+  const pos = g?.pos || entry?.pos || '';
+  const cn = g?.cn || entry?.cn || '';
+  const examSense = g?.examSense || entry?.examSense || '';
+  const note = entry?.note || '';
+  const example = entry?.example || '';
+  const context = g?.context || '';
+  const marked = isMarked(w) || isMarked(word);
+
+  const head = `<div><span class="w">${esc(w)}</span>${
+    phonetic ? `<span class="ph">${esc(phonetic)}</span>` : ''
+  }${pos ? `<span class="pos">${esc(pos)}</span>` : ''}</div>`;
+
+  let body;
+  if (loading) {
+    body = `${head}<p class="cn pop-loading">正在查这个词…</p>`;
+  } else if (error) {
+    body = `${head}<p class="cn" style="color:var(--warn)">${esc(error)}</p>`;
+  } else if (!cn) {
+    body = `${head}<p class="cn" style="color:var(--ink-soft)">${esc(note || '没查到释义，可能是拼写不对或专有名词。')}</p>`;
+  } else {
+    body = `${head}
+      <p class="cn">${esc(cn)}</p>
+      ${examSense ? `<p class="exam-sense">考研常考：${esc(examSense)}</p>` : ''}
+      ${note ? `<p class="ctx">${esc(note)}</p>` : ''}
+      ${context ? `<p class="ctx">${esc(context)}</p>` : ''}
+      ${example ? `<p class="ctx">例：${esc(example)}</p>` : ''}`;
+  }
+
+  const canMark = !loading && !error && Boolean(cn);
+  return `${body}
+    <div class="links">
+      <a href="#" data-say>🔊 朗读</a>
+      <a href="https://dictionary.cambridge.org/dictionary/english/${encodeURIComponent(word)}" target="_blank" rel="noreferrer">剑桥词典</a>
+      ${
+        canMark
+          ? `<a href="#" data-mark class="${marked ? 'on' : ''}">${marked ? '★ 已在生词本' : '☆ 收藏'}</a>`
+          : ''
+      }
+    </div>`;
+}
+
+async function markWord(word, g, entry) {
+  const src = { ...(entry || {}), ...(g || {}) };
+  const data = await api('/api/marks', {
+    method: 'POST',
+    body: {
+      word,
+      lemma: src.word,
+      phonetic: src.phonetic || '',
+      pos: src.pos || '',
+      cn: src.cn || '',
+      examSense: src.examSense || '',
+      note: src.note || '',
+      articleDate: state.date,
+    },
+  });
+  setMarks(data.marks);
+  paintMark(word, true);
+  toast(`已加入生词本：${word}`);
+}
+
+async function unmarkWord(word, lemma) {
+  const data = await api(`/api/marks?word=${encodeURIComponent(word)}`, { method: 'DELETE' });
+  setMarks(data.marks);
+  paintMark(word, false);
+  if (lemma) paintMark(lemma, false);
+}
+
+/** 只改正文里已有的高亮，不重渲染整篇文章（否则会丢答题进度和滚动位置） */
+function paintMark(word, on) {
+  const key = String(word || '').toLowerCase();
+  if (!key) return;
+  $$('mark.word').forEach((el) => {
+    const hw = (el.dataset.hw || '').toLowerCase();
+    if (hw === key || hw.startsWith(key) || key.startsWith(hw)) el.classList.toggle('mine', on);
+  });
 }
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#popover') && !e.target.closest('mark.word') && !e.target.closest('.gcard') && !e.target.closest('.word-chip')) {
-    $('#popover').hidden = true;
-  }
+  const keep =
+    e.target.closest('#popover') ||
+    e.target.closest('mark.word') ||
+    e.target.closest('.gcard') ||
+    e.target.closest('.word-chip') ||
+    e.target.closest('.mark-chip');
+  if (!keep) $('#popover').hidden = true;
 });
 
 // ------------------------------------------------------------------ 生成
@@ -772,6 +999,34 @@ function bindTop() {
   $('#archive').onclick = (e) => {
     const item = e.target.closest('.archive-item');
     if (item) load(item.dataset.date);
+  };
+
+  // 下面这几块容器本身不会被重渲染，处理器只能绑一次，否则会叠加
+  $('#articleView').addEventListener('click', onArticleClick);
+
+  $('#wordList').onclick = (e) => {
+    const chip = e.target.closest('.word-chip');
+    if (chip) openWord(e.clientX, e.clientY, chip.dataset.word, chip);
+  };
+
+  $('#markList').onclick = async (e) => {
+    const rm = e.target.closest('[data-rm]');
+    if (rm) {
+      e.stopPropagation();
+      await unmarkWord(rm.dataset.rm);
+      return;
+    }
+    const chip = e.target.closest('.mark-chip');
+    if (chip) openWord(e.clientX, e.clientY, chip.dataset.word, chip);
+  };
+
+  $('#btnClearMarks').onclick = async () => {
+    if (!state.marks.length) return;
+    if (!confirm(`确定清空生词本里的 ${state.marks.length} 个词？`)) return;
+    const data = await api('/api/marks?all=1', { method: 'DELETE' });
+    setMarks(data.marks);
+    $$('mark.word.mine').forEach((el) => el.classList.remove('mine'));
+    toast('生词本已清空');
   };
 }
 
