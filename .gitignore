@@ -9,6 +9,9 @@ node_modules/
 
 # 脚本生成、且没有被 README 引用的中间产物
 test/icon-preview.png
+# ui-check.js 每次跑都会重画这几张（界面日期、提示气泡的时机都会变），
+# 提交它们只会让每次改动都多出几个二进制 diff。要看截图请跑测试或看 docs/。
+test/screenshot*.png
 
 # 编辑器
 .vscode/

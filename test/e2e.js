@@ -427,6 +427,39 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     const noKeyDate = await json('/api/lookup');
     check('查词缺少 word 参数时报错', noKeyDate.data.ok === false && /缺少/.test(noKeyDate.data.error));
 
+    // ---- 9b-2. 短语查词：框选 in terms of 这种要能查、能存 ----
+    const phrasePrompt = require(path.join(ROOT, 'lib', 'prompt.js')).buildLookupPrompt(
+      'in terms of',
+      'In terms of cost, it is cheaper.'
+    );
+    check('短语提示词标明了这是短语', /短语/.test(phrasePrompt.user), phrasePrompt.user.slice(0, 120));
+    check('短语提示词要求给搭配结构', /搭配/.test(phrasePrompt.user));
+
+    const ph1 = await json('/api/lookup?word=' + encodeURIComponent('in terms of'));
+    check('短语查词成功', ph1.data.ok === true && !!ph1.data.entry, JSON.stringify(ph1.data).slice(0, 160));
+    check('短语的词性标成 phr.', ph1.data.entry?.pos === 'phr.', ph1.data.entry?.pos);
+    check('短语带回了搭配结构', !!ph1.data.entry?.collocation, ph1.data.entry?.collocation);
+    check('短语第一次也走模型', ph1.data.cached === false);
+    check('短语缓存文件名把空格换成下划线', fs.existsSync(path.join(DATA, 'dict', 'in_terms_of.json')));
+
+    const ph2 = await json('/api/lookup?word=In%20Terms%20Of');
+    check('短语大小写不同也能命中缓存', ph2.data.cached === true);
+
+    const tooLong = await json('/api/lookup?word=' + encodeURIComponent('a'.repeat(70)));
+    check('过长的输入被挡掉', tooLong.data.ok === false && tooLong.status === 400, String(tooLong.status));
+
+    const mkPhrase = await json('/api/marks', {
+      method: 'POST',
+      body: { word: 'in terms of', cn: '就……而言', collocation: 'in terms of sth' },
+    });
+    check('短语能收进生词本', mkPhrase.data.ok === true && mkPhrase.data.marks.some((m) => m.word === 'in terms of'));
+    check(
+      '生词本保留了短语的搭配',
+      mkPhrase.data.marks.find((m) => m.word === 'in terms of')?.collocation === 'in terms of sth'
+    );
+    await json('/api/marks?all=1', { method: 'DELETE' });
+    await json('/api/dict', { method: 'DELETE' });
+
     // ---- 9c. 自定义标记（生词本）----
     const mk1 = await json('/api/marks', { method: 'POST', body: { word: 'borrowed', lemma: 'borrow', cn: '借' } });
     check('收藏生词成功', mk1.data.ok === true && mk1.data.marks.length === 1);

@@ -289,18 +289,25 @@ function buildWordPattern(glossary, extraWords = []) {
   ];
   if (!stems.length) return null;
   const alts = stems
-    .sort((a, b) => b.length - a.length)
-    .map((w) => esc(w).replace(/\s+/g, '\\s+'))
+    .sort((a, b) => b.length - a.length) // 长的排前面，in terms of 不会被 terms 抢先匹配
+    .map((w) => {
+      // 短语不加词尾变化：take into account 的变化落在第一个词上（takes into account），
+      // 在短语尾巴上补 s/ed 只会匹配出 into accounts 这种不存在的形式
+      const suffix = /\s/.test(w) ? '' : '(?:s|es|ed|d|ing|ies|ied|ly|er|est)?';
+      return `${esc(w).replace(/\s+/g, '\\s+')}${suffix}`;
+    })
     .join('|');
-  return new RegExp(`\\b(${alts})(s|es|ed|d|ing|ies|ied|ly|er|est)?\\b`, 'gi');
+  return new RegExp(`\\b(${alts})\\b`, 'gi');
 }
 
 function highlight(text, pattern) {
   const safe = esc(text);
   if (!pattern) return safe;
-  return safe.replace(pattern, (m) => {
-    // 生词本里的词用另一种样式，和今日目标词区分开
-    const marked = state.marksSet.has(m.toLowerCase().replace(/\s+/g, ' '));
+  return safe.replace(pattern, (m, stem) => {
+    // 生词本里的词用另一种样式，和今日目标词区分开。
+    // 用 stem（不含词尾变化的部分）去比对，否则 take 收藏后 *takes* 不会变蓝
+    const key = String(stem || m).toLowerCase().replace(/\s+/g, ' ');
+    const marked = state.marksSet.has(key);
     return `<mark class="word${marked ? ' mine' : ''}" data-hw="${esc(m.replace(/\s+/g, ' '))}">${m}</mark>`;
   });
 }
@@ -410,7 +417,12 @@ function bindArticleEvents(glossaryMap, a) {
 }
 
 function findGlossary(map, key) {
+  const exact = map.get(key);
+  if (exact) return exact;
+  // 短语只认完全一致；短词也不做前缀猜测，否则 in / the 会匹配到 inevitable、there 之类
+  if (/\s/.test(key) || key.length < 4) return null;
   for (const [k, v] of map) {
+    if (k.length < 4) continue;
     if (key.startsWith(k) || k.startsWith(key)) return v;
   }
   return null;
@@ -471,6 +483,33 @@ function wordAtPoint(x, y) {
   return { word: raw, el, sentence: el.textContent };
 }
 
+/**
+ * 把用户框选的文字当成短语来查。
+ * 只在同一个段落（.en）内部生效 —— 跨段框选会把两句话拼在一起，那不是短语。
+ * 返回 null 表示这次框选不该触发查词（选中的是译文、标点、或者长得离谱）。
+ */
+function selectionPhrase() {
+  const sel = window.getSelection?.();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const raw = String(sel).replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+
+  const range = sel.getRangeAt(0);
+  const toEl = (n) => (n?.nodeType === 3 ? n.parentElement : n);
+  const startEl = toEl(range.startContainer);
+  const endEl = toEl(range.endContainer);
+  const host = startEl?.closest?.('.en');
+  if (!host || !endEl || !host.contains(endEl)) return null;
+
+  // 去掉两头的引号、标点；中英混选时只保留英文那一段
+  const cleaned = raw.replace(/^[^A-Za-z]+/, '').replace(/[^A-Za-z'\-]+$/, '');
+  if (!/^[A-Za-z][A-Za-z'\- ]*$/.test(cleaned)) return null;
+  const words = cleaned.split(' ').filter(Boolean);
+  if (!words.length || words.length > 8 || cleaned.length > 60) return null;
+
+  return { phrase: cleaned.toLowerCase(), host, wordCount: words.length };
+}
+
 function getGlossary(key) {
   const map = state.glossaryMap;
   if (!map) return null;
@@ -527,7 +566,7 @@ function drawPopover(x, y, word, opts) {
     try {
       if (isMarked(word) || isMarked(opts.g?.word) || isMarked(opts.entry?.word)) {
         await unmarkWord(word, opts.g?.word || opts.entry?.word);
-        btn.textContent = '☆ 收藏';
+        btn.textContent = isPhraseKey(word) ? '☆ 收藏短语' : '☆ 收藏';
       } else {
         await markWord(word, opts.g || opts.entry, opts.entry);
         btn.textContent = '★ 已在生词本';
@@ -540,6 +579,9 @@ function drawPopover(x, y, word, opts) {
   });
 }
 
+/** 浮层里的词条是不是一个短语（短语的收藏按钮、词典链接、提示语都不同） */
+const isPhraseKey = (w) => /\s/.test(String(w || '').trim());
+
 function popoverHtml(word, opts) {
   const { g, entry, loading, error } = opts;
   const w = g?.word || entry?.word || word;
@@ -547,18 +589,20 @@ function popoverHtml(word, opts) {
   const pos = g?.pos || entry?.pos || '';
   const cn = g?.cn || entry?.cn || '';
   const examSense = g?.examSense || entry?.examSense || '';
+  const collocation = entry?.collocation || '';
   const note = entry?.note || '';
   const example = entry?.example || '';
   const context = g?.context || '';
   const marked = isMarked(w) || isMarked(word);
+  const phrase = isPhraseKey(w) || isPhraseKey(word);
 
   const head = `<div><span class="w">${esc(w)}</span>${
     phonetic ? `<span class="ph">${esc(phonetic)}</span>` : ''
-  }${pos ? `<span class="pos">${esc(pos)}</span>` : ''}</div>`;
+  }${pos ? `<span class="pos">${esc(pos)}</span>` : ''}${phrase ? '<span class="pos phr">短语</span>' : ''}</div>`;
 
   let body;
   if (loading) {
-    body = `${head}<p class="cn pop-loading">正在查这个词…</p>`;
+    body = `${head}<p class="cn pop-loading">正在查${phrase ? '这个短语' : '这个词'}…</p>`;
   } else if (error) {
     body = `${head}<p class="cn" style="color:var(--warn)">${esc(error)}</p>`;
   } else if (!cn) {
@@ -567,21 +611,24 @@ function popoverHtml(word, opts) {
     body = `${head}
       <p class="cn">${esc(cn)}</p>
       ${examSense ? `<p class="exam-sense">考研常考：${esc(examSense)}</p>` : ''}
+      ${collocation ? `<p class="colloc">搭配：${esc(collocation)}</p>` : ''}
       ${note ? `<p class="ctx">${esc(note)}</p>` : ''}
       ${context ? `<p class="ctx">${esc(context)}</p>` : ''}
       ${example ? `<p class="ctx">例：${esc(example)}</p>` : ''}`;
   }
 
+  // 短语在剑桥词典里没有固定的词条 URL，只能用它的站内搜索
+  const dictUrl = phrase
+    ? `https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(w)}`
+    : `https://dictionary.cambridge.org/dictionary/english/${encodeURIComponent(w)}`;
+  const markLabel = marked ? '★ 已在生词本' : phrase ? '☆ 收藏短语' : '☆ 收藏';
+
   const canMark = !loading && !error && Boolean(cn);
   return `${body}
     <div class="links">
       <a href="#" data-say>🔊 朗读</a>
-      <a href="https://dictionary.cambridge.org/dictionary/english/${encodeURIComponent(word)}" target="_blank" rel="noreferrer">剑桥词典</a>
-      ${
-        canMark
-          ? `<a href="#" data-mark class="${marked ? 'on' : ''}">${marked ? '★ 已在生词本' : '☆ 收藏'}</a>`
-          : ''
-      }
+      <a href="${dictUrl}" target="_blank" rel="noreferrer">剑桥词典</a>
+      ${canMark ? `<a href="#" data-mark class="${marked ? 'on' : ''}">${markLabel}</a>` : ''}
     </div>`;
 }
 
@@ -596,99 +643,50 @@ async function markWord(word, g, entry) {
       pos: src.pos || '',
       cn: src.cn || '',
       examSense: src.examSense || '',
+      collocation: src.collocation || '',
       note: src.note || '',
       articleDate: state.date,
     },
   });
   setMarks(data.marks);
-  paintMark(word, true, src.word);
+  paintMark();
   toast(`已加入生词本：${word}`);
 }
 
 async function unmarkWord(word, lemma) {
   const data = await api(`/api/marks?word=${encodeURIComponent(word)}`, { method: 'DELETE' });
   setMarks(data.marks);
-  paintMark(word, false, lemma);
+  paintMark();
 }
 
 /**
- * 只改正文里已有的高亮，不重渲染整篇文章（否则会丢答题进度和滚动位置）。
- * 非今日目标词在正文里还只是纯文本，这里就地包一层 <mark>，收藏完立刻能看到蓝色。
+ * 只重画正文里的文字，不重渲染整篇文章（答题进度、滚动位置都保住）。
+ * 收藏/取消收藏后调用：高亮样式完全由 highlight() 决定，所以「谁该是蓝色」
+ * 只需要重新算一次，不用再纠结怎么就地包裹文本节点（短语会跨好几个节点）。
  */
-function paintMark(word, on, lemma) {
-  const key = String(word || '').toLowerCase();
-  if (!key) return;
-  $$('mark.word').forEach((el) => {
-    const hw = (el.dataset.hw || '').toLowerCase();
-    if (hw === key || hw.startsWith(key) || key.startsWith(hw)) el.classList.toggle('mine', on);
+function repaintArticleText() {
+  const a = state.article;
+  if (!a) return;
+  const pattern = buildWordPattern(a.glossary, state.marks.map((m) => m.word));
+  $$('.para').forEach((p, i) => {
+    const en = $('.en', p);
+    if (en && a.paragraphs[i]) en.innerHTML = highlight(a.paragraphs[i].en, pattern);
   });
-  if (on) wrapWordInPlace(word, lemma);
-  else unwrapWordInPlace(word, lemma);
-}
-
-/** 把正文里还是纯文本的这个词就地包成 <mark class="word mine" data-tmp="1"> */
-function wrapWordInPlace(word, lemma) {
-  const pattern = buildWordPattern([], [word, lemma].filter(Boolean));
-  if (!pattern) return 0;
-  let count = 0;
-  for (const p of $$('.para .en')) {
-    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
-    let node;
-    while ((node = walker.nextNode())) {
-      if (node.parentElement?.closest('mark.word')) continue; // 已经是高亮词了，别套两层
-      textNodes.push(node);
+  $$('.lsent').forEach((box, i) => {
+    const en = $('.ls-en', box);
+    const s = a.longSentences?.[i];
+    if (en && s) {
+      en.innerHTML = `${i + 1}. ${highlight(s.en, pattern)} <button class="say" data-ls-speak="${i}" title="朗读">🔊</button>`;
     }
-    for (const tn of textNodes) {
-      const text = tn.nodeValue;
-      pattern.lastIndex = 0;
-      if (!pattern.test(text)) continue;
-      const frag = document.createDocumentFragment();
-      let last = 0;
-      let m;
-      pattern.lastIndex = 0;
-      while ((m = pattern.exec(text))) {
-        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-        const el = document.createElement('mark');
-        el.className = 'word mine';
-        el.dataset.hw = m[0].replace(/\s+/g, ' ');
-        el.dataset.tmp = '1'; // 只为了点词临时包的，取消收藏时要能拆回去
-        el.textContent = m[0];
-        frag.appendChild(el);
-        last = m.index + m[0].length;
-        count++;
-      }
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-      tn.parentNode.replaceChild(frag, tn);
-    }
-  }
-  return count;
-}
-
-/** 取消收藏时，把临时包出来的 <mark> 拆回纯文本（否则会留下黄色目标词样式） */
-function unwrapWordInPlace(word, lemma) {
-  const keys = [word, lemma].filter(Boolean).map((w) => String(w).toLowerCase());
-  if (!keys.length) return 0;
-  let count = 0;
-  $$('mark.word[data-tmp="1"]').forEach((el) => {
-    const hw = (el.dataset.hw || '').toLowerCase();
-    if (!keys.some((k) => hw === k || hw.startsWith(k) || k.startsWith(hw))) return;
-    unwrapOne(el);
-    count++;
   });
-  return count;
 }
 
-function unwrapOne(el) {
-  const t = document.createTextNode(el.textContent);
-  el.parentNode.replaceChild(t, el);
-  t.parentNode?.normalize();
-}
-
-/** 一键清空生词本后把所有临时标记拆掉 */
-function unwrapAllTempMarks() {
-  $$('mark.word[data-tmp="1"]').forEach(unwrapOne);
-  $$('mark.word.mine').forEach((el) => el.classList.remove('mine'));
+/**
+ * 收藏/取消收藏后刷新高亮。
+ * 单词和短语走同一条路：直接重画正文，不区分单复数、也不管它跨了几个文本节点。
+ */
+function paintMark() {
+  repaintArticleText();
 }
 
 document.addEventListener('click', (e) => {
@@ -699,6 +697,25 @@ document.addEventListener('click', (e) => {
     e.target.closest('.word-chip') ||
     e.target.closest('.mark-chip');
   if (!keep) $('#popover').hidden = true;
+});
+
+// 框选一段就是查短语 —— 单词靠点，短语靠拖。
+// 记录按下鼠标那一刻的选区，只有「这次新选出来的」才触发，否则点别处关浮层时会把旧选区又查一遍。
+let selAtMouseDown = '';
+document.addEventListener(
+  'mousedown',
+  () => {
+    selAtMouseDown = String(window.getSelection?.() || '');
+  },
+  true,
+);
+document.addEventListener('mouseup', (e) => {
+  if (e.target.closest?.('#popover')) return;
+  const now = String(window.getSelection?.() || '');
+  if (!now.trim() || now === selAtMouseDown) return;
+  const hit = selectionPhrase();
+  if (!hit) return;
+  openWord(e.clientX, e.clientY, hit.phrase, hit.host);
 });
 
 // ------------------------------------------------------------------ 生成
@@ -1094,7 +1111,7 @@ function bindTop() {
     if (!confirm(`确定清空生词本里的 ${state.marks.length} 个词？`)) return;
     const data = await api('/api/marks?all=1', { method: 'DELETE' });
     setMarks(data.marks);
-    unwrapAllTempMarks();
+    paintMark();
     toast('生词本已清空');
   };
 }

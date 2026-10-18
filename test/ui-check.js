@@ -22,6 +22,7 @@ const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'bcz-ui-prof-'));
 const SHOT = path.join(ROOT, 'test', 'screenshot.png');
 const SHOT_SETTINGS = path.join(ROOT, 'test', 'screenshot-settings.png');
 const SHOT_LOOKUP = path.join(ROOT, 'test', 'screenshot-lookup.png');
+const SHOT_PHRASE = path.join(ROOT, 'test', 'screenshot-phrase.png');
 const FIXTURES = path.join(ROOT, 'test', 'fixtures');
 
 const EDGE = [
@@ -461,21 +462,21 @@ function seed() {
     check('生词本计数同步', marks1.count === '1', marks1.count);
 
     // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
-    await waitFor(() => cdp.eval(`document.querySelectorAll('mark.word.mine[data-tmp="1"]').length > 0`), {
+    await waitFor(() => cdp.eval(`document.querySelectorAll('.para .en mark.word.mine[data-hw="paragraph"]').length > 0`), {
       label: '非目标词立刻变色',
     });
     const wrapped = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        tmp: document.querySelectorAll('mark.word[data-tmp="1"]').length,
-        hw: document.querySelector('mark.word[data-tmp="1"]')?.dataset.hw,
-        inPara: !!document.querySelector('.para .en mark.word[data-tmp="1"]')
+        mine: document.querySelectorAll('mark.word.mine').length,
+        hw: document.querySelector('.para .en mark.word.mine')?.dataset.hw,
+        inPara: !!document.querySelector('.para .en mark.word.mine')
       })`)
     );
-    check('收藏后正文立刻给这个词包上高亮', wrapped.tmp > 0 && wrapped.inPara === true, JSON.stringify(wrapped));
-    check('临时高亮的词就是刚才点的词', String(wrapped.hw).toLowerCase() === 'paragraph', wrapped.hw);
+    check('收藏后正文立刻给这个词上高亮', wrapped.mine > 0 && wrapped.inPara === true, JSON.stringify(wrapped));
+    check('变色的词就是刚才点的词', String(wrapped.hw).toLowerCase() === 'paragraph', wrapped.hw);
 
     // 标一个今日目标词：正文里应该从黄底变成「生词本」样式
-    await cdp.eval(`document.querySelector('#articleView mark.word:not([data-tmp])').click(); 'ok'`);
+    await cdp.eval(`document.querySelector('#articleView mark.word:not(.mine)').click(); 'ok'`);
     await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层' });
     await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
     await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 2`), {
@@ -484,24 +485,112 @@ function seed() {
     const marks2 = JSON.parse(
       await cdp.eval(`JSON.stringify({
         chips: document.querySelectorAll('#markList .mark-chip').length,
-        mine: document.querySelectorAll('#articleView mark.word.mine:not([data-tmp])').length
+        mine: document.querySelectorAll('#articleView mark.word.mine').length
       })`)
     );
     check('生词本里现在有两项', marks2.chips === 2, JSON.stringify(marks2));
-    check('标过的目标词在正文里换了样式', marks2.mine > 0, JSON.stringify(marks2));
+    check('标过的目标词在正文里换了样式', marks2.mine >= 2, JSON.stringify(marks2));
 
-    // 从侧栏移除刚才那个非目标词：正文里要拆回纯文本，不能留下黄色目标词样式
+    // 从侧栏移除刚才那个非目标词：正文里要拆回纯文本，不能留下目标词的黄色样式
     await cdp.eval(`document.querySelector('#markList [data-rm="paragraph"]').click(); 'ok'`);
     await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '移出生词本' });
     const afterRemove = JSON.parse(
       await cdp.eval(`JSON.stringify({
         chips: document.querySelectorAll('#markList .mark-chip').length,
-        tmp: document.querySelectorAll('mark.word[data-tmp="1"]').length,
+        left: document.querySelectorAll('mark.word[data-hw="paragraph"]').length,
         stillMarked: document.querySelectorAll('#markList .mark-chip .w')[0]?.textContent
       })`)
     );
     check('能从侧栏把词移出生词本', afterRemove.chips === 1, JSON.stringify(afterRemove));
-    check('移出后临时高亮被拆回纯文本', afterRemove.tmp === 0, JSON.stringify(afterRemove));
+    check('移出后这个词在正文里变回纯文本', afterRemove.left === 0, JSON.stringify(afterRemove));
+
+    // ---------- 框选短语查词（真的用鼠标拖选，不是伪造 selection）----------
+    const dragPos = JSON.parse(
+      await cdp.eval(`(() => {
+        try { window.getSelection().removeAllRanges(); } catch {}
+        document.getElementById('popover').hidden = true;
+        const p = document.querySelector('.para[data-para="0"] .en');
+        const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        let node, hit = null;
+        while ((node = walker.nextNode())) {
+          if (node.parentElement.closest('mark.word')) continue;
+          const i = node.nodeValue.toLowerCase().indexOf('talk about');
+          if (i >= 0) { hit = { node, i }; break; }
+        }
+        if (!hit) return JSON.stringify({ ok: false });
+        const rectOf = (a, b) => {
+          const r = document.createRange();
+          r.setStart(hit.node, a);
+          r.setEnd(hit.node, b);
+          return r.getBoundingClientRect();
+        };
+        const r1 = rectOf(hit.i, hit.i + 4);
+        const r2 = rectOf(hit.i + 5, hit.i + 10);
+        return JSON.stringify({
+          ok: true,
+          x1: Math.round(r1.left + 2), y1: Math.round(r1.top + r1.height / 2),
+          x2: Math.round(r2.right - 2), y2: Math.round(r2.top + r2.height / 2)
+        });
+      })()`)
+    );
+    check('正文里能找到可拖选的短语', dragPos.ok === true, JSON.stringify(dragPos));
+
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed', x: dragPos.x1, y: dragPos.y1, button: 'left', buttons: 1, clickCount: 1,
+    });
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: dragPos.x2, y: dragPos.y2, button: 'left', buttons: 1,
+    });
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x: dragPos.x2, y: dragPos.y2, button: 'left', buttons: 0, clickCount: 1,
+    });
+
+    await waitFor(
+      () => cdp.eval(`(document.querySelector('#popover .cn')?.textContent || '').includes('查询测试')`),
+      { label: '框选短语查词结果' }
+    );
+    const phrasePop = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        word: document.getElementById('popover').dataset.word,
+        pos: document.querySelector('#popover .pos')?.textContent || '',
+        colloc: document.querySelector('#popover .colloc')?.textContent || '',
+        btn: document.querySelector('#popover [data-mark]')?.textContent || '',
+        hidden: document.getElementById('popover').hidden
+      })`)
+    );
+    // 曾经的 bug：拖选时 mousedown 时已有选区，mouseup 就不再处理，框选什么也不发生
+    check('拖选短语能弹出浮层', phrasePop.hidden === false && phrasePop.word === 'talk about', JSON.stringify(phrasePop));
+    check('短语浮层标出了词性是短语', /phr\./.test(phrasePop.pos), phrasePop.pos);
+    check('短语浮层给出了搭配', phrasePop.colloc.includes('搭配'), phrasePop.colloc);
+    check('短语的收藏按钮文案是「收藏短语」', /收藏短语/.test(phrasePop.btn), phrasePop.btn);
+
+    await sleep(150);
+    const shotPhrase = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(SHOT_PHRASE, Buffer.from(shotPhrase.data, 'base64'));
+    check('框选短语的浮层截图已保存', fs.existsSync(SHOT_PHRASE) && fs.statSync(SHOT_PHRASE).size > 10000);
+
+    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
+    await waitFor(
+      () => cdp.eval(`!!document.querySelector('#articleView mark.word.mine[data-hw="talk about"]')`),
+      { label: '短语收藏后变色' }
+    );
+    const phraseMarked = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        inArticle: document.querySelectorAll('#articleView mark.word.mine[data-hw="talk about"]').length,
+        chips: document.querySelectorAll('#markList .mark-chip').length,
+        btn: document.querySelector('#popover [data-mark]')?.textContent || ''
+      })`)
+    );
+    check('之前框选的短语被整体标成生词', phraseMarked.inArticle >= 1, JSON.stringify(phraseMarked));
+    check('短语收藏后按钮变为「已在生词本」', /已在生词本/.test(phraseMarked.btn), phraseMarked.btn);
+
+    // 清掉短语，别把它带进截图
+    await cdp.eval(`document.querySelector('#markList [data-rm="talk about"]').click(); 'ok'`);
+    await waitFor(
+      () => cdp.eval(`!document.querySelector('mark.word.mine[data-hw="talk about"]')`),
+      { label: '短语移出生词本' }
+    );
+    check('短语也能从侧栏移除', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
 
     // 收尾：关掉浮层，留下一项生词本内容给截图用
     await cdp.eval(`document.getElementById('popover').hidden = true; 'ok'`);

@@ -436,6 +436,7 @@ async function handleApi(req, res, url) {
       pos: String(body.pos || '').trim(),
       cn: String(body.cn || '').trim(),
       examSense: String(body.examSense || '').trim(),
+      collocation: String(body.collocation || '').trim(),
       note: String(body.note || '').trim(),
       articleDate: body.articleDate ? store.normalizeDate(body.articleDate) : undefined,
     });

@@ -52,7 +52,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 | 2 | 把截图**一次全拖进**阅读器（最多 12 张） | 几秒 |
 | 3 | 点「开始识别」，勾掉不想要的词 | 几秒 |
 | 4 | 点「生成文章」 | 等 30 秒 |
-| 5 | 读 | — |
+| 5 | 读（点词查意思、拖选查短语、顺手收藏生词） | — |
 
 - **可以一张一张加**：分几次导入会累加去重，不会互相覆盖。第二批全是重复词时会提示「新增 0 个，跳过重复 N 个」。
 - **清空**：侧栏「今日单词」右上角（只清单词，已生成的文章不受影响）。
@@ -66,6 +66,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 - 别的词才会调一次模型查；查过的存进 `data/dict/`，再点就命中缓存，**同一个词只花一次钱**
 - 浮层里有音标、词性、中文释义、例句，还能点 🔊 朗读、跳剑桥词典
 - 点「☆ 收藏」收进侧栏的**我的生词**
+
+**短语也能查**：在正文里按住鼠标**拖选**几个词（比如 `in terms of`、`take into account`），松手就弹浮层，
+会额外给出「搭配」结构，收藏按钮变成「☆ 收藏短语」，正文里整段短语一起变蓝。
+
+> 一次最多选 8 个词、60 个字符 —— 拖多了会提示「选得太长」。查词缓存的文件名把空格换成下划线
+> （`in terms of` → `dict/in_terms_of.json`），所以短语查一次也就只花一次钱。
+
+框选的效果长这样：[docs/screenshot-phrase.png](docs/screenshot-phrase.png)。
 
 正文里的高亮分两种：**黄色**是今天要背的目标词，**淡蓝底 + 虚线下划线**是你自己收进生词本的词。收藏之后正文里会**立刻**变色，不用等重新生成文章。
 生词本存在 `data/marks.json`，可以单独移出，也可以一键清空；查词缓存可以在设置里清（换了模型、觉得释义不对时用）。
@@ -136,16 +144,17 @@ daily-reading/
 │  ├─ msg-no-node.txt     没装 Node.js 时的中文提示（UTF-8 无 BOM）
 │  └─ msg-old-node.txt    Node.js 版本太旧时的中文提示
 ├─ docs/
-│  └─ screenshot-exam.png 界面截图（真题模式实拍）
+│  ├─ screenshot-exam.png 界面截图（真题模式实拍）
+│  └─ screenshot-phrase.png 框选短语查词的浮层
 ├─ lib/
 │  ├─ store.js            data/ 目录的读写
-│  ├─ dict.js             划词查词：查缓存 → 调模型 → 写缓存
+│  ├─ dict.js             划词查词：查缓存 → 调模型 → 写缓存（单词和短语同一套）
 │  ├─ prompt.js           考研向提示词 + 模型输出校验
 │  ├─ deepseek.js         DeepSeek（OpenAI 兼容）调用
 │  ├─ ocr.js              截图识别的 Node 封装 + 按字号挑词
 │  └─ ocr.ps1             调 Windows.Media.Ocr 的 PowerShell 脚本
 ├─ public/                前端（原生 HTML/CSS/JS，无需构建）
-├─ test/                  测试（127 + 75 项，用本地假模型）
+├─ test/                  测试（138 + 87 项，用本地假模型）
 └─ data/                  运行时自动创建，全部是明文 JSON
    ├─ config.json         API Key、文章偏好
    ├─ marks.json          我的生词本
@@ -161,11 +170,13 @@ daily-reading/
 ## 测试
 
 ```bash
-node test/e2e.js        # 后端端到端（127 项）：真 OCR + 假模型 + 真 HTTP
-node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（75 项）并截图
+node test/e2e.js        # 后端端到端（138 项）：真 OCR + 假模型 + 真 HTTP
+node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（87 项）并截图
 ```
 
 两个测试都用本地假模型，不消耗 token、不访问外网，也不会弹浏览器窗口。
+`ui-check.js` 里框选短语那段是**真的用鼠标拖选**（CDP `Input.dispatchMouseEvent`），
+不是伪造 `selection` —— 因为这功能当初最容易坏的地方就是「mousedown 时已经有选区」这个时序。
 
 ## 常见问题
 

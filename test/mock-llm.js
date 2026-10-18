@@ -36,12 +36,14 @@ const server = http.createServer((req, res) => {
     const parsed = JSON.parse(body || '{}');
     const user = parsed.messages?.find((m) => m.role === 'user')?.content || '';
     const isOcrFix = user.includes('OCR 出来的候选英文单词');
-    const isLookup = user.includes('读者在文章中点了这个词');
+    const isLookup = /读者在文章中点了这(个词|个短语)/.test(user);
 
-    // 划词查词：返回固定假释义；lemma 去掉常见后缀，用来验证前端显示的是原形
+    // 划词查词：返回固定假释义；单词的 lemma 去掉常见后缀，用来验证前端显示的是原形。
+    // 短语不做后缀剥离（in other words 不能被砍成 in other word）。
     if (isLookup) {
-      const word = (user.match(/^单词：(.+)$/m) || [])[1]?.trim() || 'word';
-      const lemma = word.replace(/(ies|ied|ing|ed|es|s)$/i, '') || word;
+      const phrase = /^短语：(.+)$/m.test(user);
+      const word = (user.match(/^(?:单词|短语)：(.+)$/m) || [])[1]?.trim() || 'word';
+      const lemma = phrase ? word : word.replace(/(ies|ied|ing|ed|es|s)$/i, '') || word;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -52,10 +54,11 @@ const server = http.createServer((req, res) => {
               message: {
                 content: JSON.stringify({
                   word: lemma,
-                  phonetic: `/${lemma.toLowerCase()}/`,
-                  pos: 'n.',
+                  phonetic: phrase ? '' : `/${lemma.toLowerCase()}/`,
+                  pos: phrase ? 'phr.' : 'n.',
                   cn: `${lemma} 的中文释义（查询测试）`,
                   examSense: '',
+                  collocation: phrase ? `${lemma} sth` : '',
                   example: `They talked about ${lemma} for a while.`,
                   note: '',
                 }),
