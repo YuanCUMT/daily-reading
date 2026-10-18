@@ -162,13 +162,24 @@ function renderMarks() {
     return;
   }
   box.innerHTML = state.marks
-    .map(
-      (m) => `<button class="mark-chip" data-word="${esc(m.word)}">
-        <span class="w">${esc(m.word)}</span>
-        <span class="m">${esc(m.cn || m.note || m.phonetic || '')}</span>
-        <span class="rm" data-rm="${esc(m.word)}" title="移出生词本">✕</span>
-      </button>`
-    )
+    .map((m) => {
+      // 一行一个词太挤，释义/搭配/考研义项全被省略号吃掉。改成多行卡片，内容全部展开。
+      const subs = [
+        m.collocation ? `<div class="mk-sub"><i>搭配</i>${esc(m.collocation)}</div>` : '',
+        m.examSense ? `<div class="mk-sub"><i>考研常考</i>${esc(m.examSense)}</div>` : '',
+        m.note ? `<div class="mk-sub mk-note">${esc(m.note)}</div>` : '',
+      ].join('');
+      return `<div class="mark-chip" data-word="${esc(m.word)}">
+        <div class="mk-top">
+          <span class="w">${esc(m.word)}</span>
+          ${m.phonetic ? `<span class="ph">${esc(m.phonetic)}</span>` : ''}
+          ${m.pos ? `<span class="pos">${esc(m.pos)}</span>` : ''}
+          <span class="rm" data-rm="${esc(m.word)}" title="移出生词本">✕</span>
+        </div>
+        ${m.cn ? `<div class="m">${esc(m.cn)}</div>` : ''}
+        ${subs}
+      </div>`;
+    })
     .join('');
 }
 

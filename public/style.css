@@ -75,7 +75,26 @@ input[type="date"] {
 
 /* ---------------- 布局 ---------------- */
 .body { display: flex; gap: 24px; padding: 24px; align-items: flex-start; flex: 1; }
-.sidebar { width: 268px; flex: none; position: sticky; top: 84px; display: flex; flex-direction: column; gap: 16px; }
+/* sticky 元素比视口高时，下半截会永远停在屏幕外、滚轮也带不下来。
+   给侧栏一个自身上限 + 内部滚动，生词本再长也够得着。 */
+.sidebar {
+  width: 268px; flex: none; position: sticky; top: 84px;
+  max-height: calc(100vh - 104px); overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 16px;
+  padding-right: 3px; scrollbar-width: thin; overscroll-behavior: contain;
+}
+.sidebar::-webkit-scrollbar, .mark-list::-webkit-scrollbar,
+.word-list::-webkit-scrollbar, .archive::-webkit-scrollbar { width: 8px; height: 8px; }
+.sidebar::-webkit-scrollbar-thumb, .mark-list::-webkit-scrollbar-thumb,
+.word-list::-webkit-scrollbar-thumb, .archive::-webkit-scrollbar-thumb {
+  background: #d9d2c8; border-radius: 99px; border: 2px solid transparent; background-clip: padding-box;
+}
+.sidebar::-webkit-scrollbar-thumb:hover, .mark-list::-webkit-scrollbar-thumb:hover,
+.word-list::-webkit-scrollbar-thumb:hover, .archive::-webkit-scrollbar-thumb:hover {
+  background: #c3b9ab; background-clip: padding-box;
+}
+.sidebar::-webkit-scrollbar-track, .mark-list::-webkit-scrollbar-track,
+.word-list::-webkit-scrollbar-track, .archive::-webkit-scrollbar-track { background: transparent; }
 .main { flex: 1; min-width: 0; }
 
 .panel {
@@ -109,24 +128,36 @@ input[type="date"] {
 .word-chip .m { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------------- 生词本 ---------------- */
-.mark-list { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow: auto; }
+.mark-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
 .mark-chip {
-  display: flex; align-items: baseline; gap: 8px; position: relative;
-  padding: 5px 22px 5px 8px; border-radius: 8px; cursor: pointer; border: none; background: none;
-  text-align: left; width: 100%;
+  position: relative; padding: 8px 24px 9px 10px; border-radius: 10px; cursor: pointer;
+  border: 1px solid transparent; background: none; text-align: left;
 }
-.mark-chip:hover { background: var(--surface-2); }
+.mark-chip:hover { background: var(--surface-2); border-color: var(--line); }
+.mark-chip .mk-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .mark-chip .w {
   font-family: var(--serif); font-size: 15px; font-weight: 600;
-  /* 短语可能很长（in terms of / take sth into account），长了自己省略，别把释义挤没 */
-  max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* 短语（in terms of / take sth into account）和长单词允许折行，不再被省略号截断 */
+  overflow-wrap: anywhere;
+}
+.mark-chip .ph { font-size: 11.5px; color: var(--ink-soft); }
+.mark-chip .pos {
+  font-size: 10.5px; color: var(--ink-soft); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; line-height: 1.4;
 }
 .mark-chip .m {
-  font-size: 12px; color: var(--ink-soft);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-top: 3px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.55;
+  white-space: normal; overflow-wrap: anywhere;
 }
+.mark-chip .mk-sub {
+  margin-top: 4px; font-size: 11.5px; color: var(--ink-soft); line-height: 1.55;
+  background: var(--surface-2); border-radius: 6px; padding: 3px 6px;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.mark-chip .mk-sub i { font-style: normal; color: var(--accent); margin-right: 4px; }
+.mark-chip .mk-note { background: none; padding: 0 2px; }
 .mark-chip .rm {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  position: absolute; right: 5px; top: 6px;
   width: 16px; height: 16px; line-height: 15px; text-align: center;
   border-radius: 50%; font-size: 10px; color: var(--ink-soft); opacity: 0;
 }
@@ -395,8 +426,8 @@ details.diag pre { background: var(--surface-2); border: 1px solid var(--line); 
 
 @media (max-width: 900px) {
   .body { flex-direction: column; padding: 16px; }
-  .sidebar { width: 100%; position: static; }
-  .word-list, .archive { max-height: 200px; }
+  .sidebar { width: 100%; position: static; max-height: none; overflow: visible; padding-right: 0; }
+  .word-list, .archive, .mark-list { max-height: 200px; }
   .article-head h2 { font-size: 26px; }
   .para { padding: 14px 18px; }
   .grid2 { grid-template-columns: 1fr; }

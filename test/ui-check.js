@@ -461,6 +461,52 @@ function seed() {
     check('收藏后按钮变成「已在生词本」', marks1.btn.includes('已在生词本'), marks1.btn);
     check('生词本计数同步', marks1.count === '1', marks1.count);
 
+    // 生词本要能一眼看全：多行卡片 + 不截断 + 侧栏可滚动
+    const markLayout = JSON.parse(
+      await cdp.eval(`JSON.stringify((() => {
+        const chip = document.querySelector('#markList .mark-chip');
+        const w = chip.querySelector('.w');
+        const m = chip.querySelector('.m');
+        const cs = getComputedStyle(m);
+        return {
+          hasTop: !!chip.querySelector('.mk-top'),
+          wrapped: cs.whiteSpace === 'normal' && cs.textOverflow !== 'ellipsis',
+          notClipped: m.scrollWidth <= m.clientWidth + 1 && w.scrollWidth <= w.clientWidth + 1,
+          stacked: m.offsetTop >= w.offsetTop,
+          sideOverflow: getComputedStyle(document.querySelector('.sidebar')).overflowY,
+          listOverflow: getComputedStyle(document.getElementById('markList')).overflowY
+        };
+      })())`)
+    );
+    check('生词本是「词 + 释义」多行卡片', markLayout.hasTop && markLayout.stacked, JSON.stringify(markLayout));
+    check('生词本里的释义不再被省略号截断', markLayout.wrapped && markLayout.notClipped, JSON.stringify(markLayout));
+    check('侧栏与生词本都能滚动', markLayout.sideOverflow === 'auto' && markLayout.listOverflow === 'auto', JSON.stringify(markLayout));
+
+    // 塞满生词本，验证真的能滚到底（不是只有 overflow 属性写着 auto）
+    const scrollInfo = JSON.parse(
+      await cdp.eval(`JSON.stringify((() => {
+        window.__realMarks = state.marks.slice();
+        state.marks = window.__realMarks.concat(Array.from({ length: 12 }, (_, i) => ({
+          word: 'zzsample' + i,
+          cn: '很长的示例释义，用来把生词本撑高，看看滚轮能不能划到底 ' + i,
+          pos: 'n.',
+          collocation: 'sample sth'
+        })));
+        renderMarks();
+        const box = document.getElementById('markList');
+        const before = box.scrollTop;
+        box.scrollTop = box.scrollHeight;
+        const after = box.scrollTop;
+        return {
+          overflows: box.scrollHeight > box.clientHeight + 2,
+          scrolled: after > before + 10,
+          count: document.querySelectorAll('#markList .mark-chip').length
+        };
+      })())`)
+    );
+    check('生词本变长后能滚到底', scrollInfo.overflows && scrollInfo.scrolled, JSON.stringify(scrollInfo));
+    await cdp.eval(`state.marks = window.__realMarks; renderMarks(); 'ok'`);
+
     // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
     await waitFor(() => cdp.eval(`document.querySelectorAll('.para .en mark.word.mine[data-hw="paragraph"]').length > 0`), {
       label: '非目标词立刻变色',

@@ -81,6 +81,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 
 正文里的高亮分两种：**黄色**是今天要背的目标词，**淡蓝底 + 虚线下划线**是你自己收进生词本的词。收藏之后正文里会**立刻**变色，不用等重新生成文章。
 生词本存在 `data/marks.json`，可以单独移出，也可以一键清空；查词缓存可以在设置里清（换了模型、觉得释义不对时用）。
+侧栏的「我的生词」是**多行卡片**（词头一行，释义、搭配、考研常考各占一行，全部展开不截断），
+侧栏和生词本各自都能用滚轮滚动 —— 生词攒到几十个也不用靠悬停去看被省略号吃掉的释义。
 
 ## 两种文章模式
 
@@ -158,7 +160,7 @@ daily-reading/
 │  ├─ ocr.js              截图识别的 Node 封装 + 按字号挑词
 │  └─ ocr.ps1             调 Windows.Media.Ocr 的 PowerShell 脚本
 ├─ public/                前端（原生 HTML/CSS/JS，无需构建）
-├─ test/                  测试（138 + 87 项，用本地假模型）
+├─ test/                  测试（138 + 93 项，用本地假模型）
 └─ data/                  运行时自动创建，全部是明文 JSON
    ├─ config.json         API Key、文章偏好
    ├─ marks.json          我的生词本
@@ -175,7 +177,7 @@ daily-reading/
 
 ```bash
 node test/e2e.js        # 后端端到端（138 项）：真 OCR + 假模型 + 真 HTTP
-node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（87 项）并截图
+node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（93 项）并截图
 ```
 
 两个测试都用本地假模型，不消耗 token、不访问外网，也不会弹浏览器窗口。
