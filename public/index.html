@@ -184,8 +184,10 @@ reluctant</pre>
         <div class="tabs vocab-tabs">
           <button class="vtab active" data-vtab="daily">每日单词 <span class="count" id="vtabDailyCount">0</span></button>
           <button class="vtab" data-vtab="mine">我的生词 <span class="count" id="vtabMineCount">0</span></button>
+          <button class="vtab" data-vtab="phrases">短语 <span class="count" id="vtabPhraseCount">0</span></button>
         </div>
         <div class="vocab-tools">
+          <button class="btn ghost" id="btnFillMeaning" hidden>补全释义</button>
           <select id="vocabSort" title="排序方式">
             <option value="time-desc">时间：新 → 旧</option>
             <option value="time-asc">时间：旧 → 新</option>
@@ -195,6 +197,7 @@ reluctant</pre>
           <input type="search" id="vocabSearch" placeholder="搜单词或释义" />
         </div>
       </div>
+      <p class="tip" id="vocabStatus" hidden></p>
       <div id="vocabBody" class="vocab-grid"></div>
       <p class="tip" id="vocabEmpty" hidden></p>
     </div>

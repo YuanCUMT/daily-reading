@@ -349,6 +349,15 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     const apple = (vocab2.data.days.find((d) => d.date === '2026-10-15') || { words: [] }).words.find((w) => w.word === 'apple');
     check('单词本会拿查词缓存补释义', !!apple && apple.meaning.includes('苹果') && apple.pos === 'n.', JSON.stringify(apple));
     fs.rmSync(path.join(DATA, 'dict', 'apple.json'), { force: true }); // 别干扰后面数缓存条数的断言
+
+    // ---- 5c. 单词本批量补释义（要调模型，所以只有「缺多少」在这里测）----
+    const dictDir = path.join(DATA, 'dict');
+    const dictBefore = fs.existsSync(dictDir) ? fs.readdirSync(dictDir) : [];
+    const missBefore = (await json('/api/vocab')).data.missing;
+    check('单词本统计了缺释义的词数', missBefore > 0, String(missBefore));
+    const fillNoKey = await json('/api/vocab/fill', { method: 'POST', body: { limit: 3 } });
+    check('没配 Key 时补释义给出中文提示', fillNoKey.data.ok === false && fillNoKey.data.error.includes('API Key'), JSON.stringify(fillNoKey.data));
+
     await json('/api/words?date=2026-10-15', { method: 'DELETE' });
 
     // ---- 6. 配置 ----
@@ -366,6 +375,38 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     check('配置文件里存了真 key', cfgFile.deepseek.apiKey === 'sk-test-secret-1234');
     check('偏好已合并', cfgFile.prefs.paragraphs === 4 && cfgFile.prefs.style);
     check('旧配置里的百词斩字段已被清掉', JSON.stringify(cfgFile).includes('baicizhan') === false || !cfgFile.baicizhan);
+
+    // ---- 6b. 单词本批量补释义（配好 key 之后才跑得通）----
+    {
+      // 造一天没有释义的词：OCR 出来的词表就是这样的
+      await json('/api/words', {
+        method: 'POST',
+        body: { date: '2026-10-14', words: [{ word: 'quokka' }, { word: 'numbat' }, { word: 'wombat' }] },
+      });
+      const dir = path.join(DATA, 'dict');
+      const before = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+      const miss2 = (await json('/api/vocab')).data.missing;
+      check('单词本还能数出缺释义的词', miss2 === 3, String(miss2));
+
+      const f1 = await json('/api/vocab/fill', { method: 'POST', body: { limit: 3 } });
+      check('补释义接口返回 ok', f1.data.ok === true, JSON.stringify(f1.data));
+      check('补释义按批处理（这批补了 3 个）', f1.data.filled === 3, JSON.stringify(f1.data));
+      check('补完就没有缺的了', f1.data.remaining === 0, JSON.stringify(f1.data));
+
+      const added = fs.readdirSync(dir).filter((f) => !before.includes(f));
+      check('补过的词落进了查词缓存', added.length === 3, added.join(','));
+
+      const after = (await json('/api/vocab')).data;
+      const filled = after.days.flatMap((d) => d.words).filter((w) => w.meaning.includes('批量释义'));
+      check('补回来的释义出现在单词本里', filled.length === 3, JSON.stringify(filled));
+
+      const f2 = await json('/api/vocab/fill', { method: 'POST', body: { limit: 3 } });
+      check('没有缺的词时补释义是空转', f2.data.filled === 0 && f2.data.remaining === 0, JSON.stringify(f2.data));
+
+      // 清掉这一节写入的缓存和词表，别干扰后面「词条数」相关断言
+      for (const f of fs.readdirSync(dir)) if (!before.includes(f)) fs.rmSync(path.join(dir, f), { force: true });
+      await json('/api/words?date=2026-10-14', { method: 'DELETE' });
+    }
 
     // 配好 key 之后，OCR 的 AI 校正应该生效
     if (!failures.includes('单词卡截图 OCR 成功')) {

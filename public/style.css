@@ -445,6 +445,9 @@ details.diag pre { background: var(--surface-2); border: 1px solid var(--line); 
   background: var(--surface-2); font-size: 12.5px; color: var(--ink); margin: 0; width: auto;
 }
 .vocab-tools input { width: 170px; }
+#btnFillMeaning { white-space: nowrap; }
+#vocabStatus { flex: none; margin: 0 0 10px; color: var(--ink-soft); }
+#vocabStatus.err { color: #a5321c; }
 .vocab-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(222px, 1fr));
   gap: 10px; align-content: start; flex: 1; min-height: 0;

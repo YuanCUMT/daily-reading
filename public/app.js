@@ -205,20 +205,26 @@ async function openVocab(tab = 'daily') {
   openModal($('#modalVocab'));
 }
 
+/** 生词本里的条目标记成短语：带空格，或者词性是 phr. */
+const isPhraseMark = (m) => /\s/.test(String(m.word || '')) || String(m.pos || '').toLowerCase() === 'phr.';
+
 function vocabItems() {
-  if (state.vocabTab === 'mine') {
-    return state.marks.map((m) => ({
-      word: m.word,
-      phonetic: m.phonetic || '',
-      pos: m.pos || '',
-      meaning: m.cn || '',
-      collocation: m.collocation || '',
-      examSense: m.examSense || '',
-      note: m.note || '',
-      time: m.addedAt || m.articleDate || '',
-      date: String(m.addedAt || '').slice(0, 10) || m.articleDate || '',
-      removable: true,
-    }));
+  if (state.vocabTab === 'mine' || state.vocabTab === 'phrases') {
+    const wantPhrase = state.vocabTab === 'phrases';
+    return state.marks
+      .filter((m) => isPhraseMark(m) === wantPhrase)
+      .map((m) => ({
+        word: m.word,
+        phonetic: m.phonetic || '',
+        pos: m.pos || '',
+        meaning: m.cn || '',
+        collocation: m.collocation || '',
+        examSense: m.examSense || '',
+        note: m.note || '',
+        time: m.addedAt || m.articleDate || '',
+        date: String(m.addedAt || '').slice(0, 10) || m.articleDate || '',
+        removable: true,
+      }));
   }
   const out = [];
   for (const day of state.vocab?.days || []) {
@@ -273,14 +279,26 @@ function vocabCard(it, showDate) {
 }
 
 function renderVocab() {
-  const daily = state.vocabTab !== 'mine';
+  const tab = state.vocabTab === 'phrases' ? 'phrases' : state.vocabTab === 'mine' ? 'mine' : 'daily';
+  const daily = tab === 'daily';
+  const phraseMarks = state.marks.filter(isPhraseMark).length;
   $('#vtabDailyCount').textContent = state.vocab?.total ?? 0;
-  $('#vtabMineCount').textContent = state.marks.length;
+  $('#vtabMineCount').textContent = state.marks.length - phraseMarks;
+  $('#vtabPhraseCount').textContent = phraseMarks;
   document.querySelectorAll('#modalVocab [data-vtab]').forEach((b) => {
-    b.classList.toggle('active', b.dataset.vtab === (daily ? 'daily' : 'mine'));
+    b.classList.toggle('active', b.dataset.vtab === tab);
   });
   const sel = $('#vocabSort');
   if (sel) sel.value = state.vocabSort;
+
+  // 「补全释义」只在每日单词页、且确实还缺释义时出现
+  const missing = state.vocab?.missing ?? 0;
+  const fillBtn = $('#btnFillMeaning');
+  if (fillBtn) {
+    fillBtn.hidden = !daily || !missing;
+    fillBtn.textContent = `补全释义（${missing}）`;
+    fillBtn.disabled = Boolean(state.filling);
+  }
 
   const items = sortedVocabItems();
   const box = $('#vocabBody');
@@ -291,7 +309,9 @@ function renderVocab() {
         ? `没有匹配「${esc(q)}」的词。`
         : daily
           ? '还没有导入过单词。点右上角「导入单词」开始。'
-          : '生词本还是空的。阅读时点任意单词，再点「☆ 收藏」就能收进来。'
+          : tab === 'phrases'
+            ? '还没有收藏过短语。在正文里拖选几个词（比如 in terms of），松手后点「☆ 收藏短语」。'
+            : '生词本还是空的。阅读时点任意单词，再点「☆ 收藏」就能收进来。'
     }</p>`;
     return;
   }
@@ -311,6 +331,60 @@ function renderVocab() {
     html += vocabCard(it, !grouped);
   }
   box.innerHTML = html;
+}
+
+function setVocabStatus(text, isError = false) {
+  const el = $('#vocabStatus');
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.classList.toggle('err', Boolean(isError));
+}
+
+/**
+ * 补全释义：一次只让后端处理一批（40 个），前端循环，
+ * 这样有进度、也不会因为一次请求太久被浏览器掐断。
+ */
+async function fillMissingMeanings() {
+  if (state.filling) return;
+  const missing = state.vocab?.missing ?? 0;
+  if (!missing) return;
+  const rounds = Math.ceil(missing / 40);
+  const ok = confirm(
+    `有 ${missing} 个词还没有中文释义。\n\n` +
+      `要调用模型补全吗？大约 ${rounds} 次请求（${Math.min(missing, 40)} 个一批），` +
+      `补过的会存进本地词典缓存，以后再也不会重复花钱。`
+  );
+  if (!ok) return;
+
+  state.filling = true;
+  renderVocab();
+  let done = 0;
+  try {
+    for (let round = 0; round < 15; round++) {
+      setVocabStatus(`正在补第 ${done + 1} 个开始的这一批……（已补 ${done}，还剩 ${missing - done}）`);
+      const r = await api('/api/vocab/fill', { method: 'POST', body: { limit: 40 }, timeoutMs: 180000 });
+      done += r.filled || 0;
+      state.vocab = await api('/api/vocab');
+      renderVocab();
+      setVocabStatus(`已补 ${done} 个，还剩 ${r.remaining} 个……`);
+      if (!r.remaining) break;
+      if (!r.filled) {
+        setVocabStatus('模型这次没有返回新的释义，先停下了。过会儿再试一次。', true);
+        break;
+      }
+    }
+    if (done) {
+      setVocabStatus(`这次补全了 ${done} 个词的释义。`);
+      toast(`补全了 ${done} 个词的释义`);
+    }
+  } catch (err) {
+    setVocabStatus(err.message || '补释义失败', true);
+    toast(err.message || '补释义失败', true);
+  } finally {
+    state.filling = false;
+    renderVocab();
+  }
 }
 
 function renderArticle() {
@@ -1250,7 +1324,7 @@ function bindTop() {
   $('#modalVocab').addEventListener('click', async (e) => {
     const tab = e.target.closest('[data-vtab]');
     if (tab) {
-      state.vocabTab = tab.dataset.vtab === 'mine' ? 'mine' : 'daily';
+      state.vocabTab = ['mine', 'phrases'].includes(tab.dataset.vtab) ? tab.dataset.vtab : 'daily';
       state.vocabQuery = '';
       const search = $('#vocabSearch');
       if (search) search.value = '';
@@ -1277,6 +1351,7 @@ function bindTop() {
     state.vocabQuery = e.target.value;
     renderVocab();
   });
+  $('#btnFillMeaning').onclick = () => fillMissingMeanings();
 
   $('#empty')?.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
