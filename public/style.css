@@ -210,6 +210,13 @@ input[type="date"]:focus-visible, .mode-quick:focus-visible {
 
 /* ---------------------------------------------------------------- 侧栏面板 */
 .panel { border: 1px solid var(--ink); background: var(--paper-white); }
+/* 侧栏生词列表末尾的「还有 N 个」提示 */
+.mk-more {
+  margin: 2px 6px 0; padding: 6px 0 2px;
+  font-size: 10.5px; letter-spacing: .2px; color: var(--muted);
+  text-align: right; border-top: 1px dashed var(--grid);
+}
+.mk-more span { letter-spacing: 2px; }
 .panel-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 7px 12px; border-bottom: 1px solid var(--grid); background: var(--paper);
@@ -913,11 +920,13 @@ kbd {
 }
 .panel-link {
   display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 10px; padding-bottom: 1px;
+  margin: 16px 12px 14px auto; padding-bottom: 2px;
   font-size: 11.5px; font-weight: 700; color: var(--ink);
   text-decoration: none; border-bottom: 1px solid var(--ink);
 }
 .panel-link:hover { color: var(--red); border-bottom-color: var(--red); }
+/* 「去生词本复习」独占一行、靠右下角，别贴着边框 */
+.panel > .panel-link { display: flex; width: fit-content; }
 
 /* ==========================================================================
    首页：顶栏导航 + 今日文章 + 历史文章

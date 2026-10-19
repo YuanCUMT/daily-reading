@@ -485,21 +485,29 @@ function seed() {
     fs.writeFileSync(SHOT_LOOKUP, Buffer.from(shotLookup.data, 'base64'));
     check('划词浮层截图已保存', fs.existsSync(SHOT_LOOKUP) && fs.statSync(SHOT_LOOKUP).size > 10000);
 
+    // 导入的单词会自动进生词本，所以这里的数量都是「在原有基础上 +N」
+    const marksBefore = Number(await cdp.eval(`state.marks.length`));
+    check('导入的单词已经自动进生词本', marksBefore > 0, String(marksBefore));
+
     await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '收藏入生词本' });
+    await waitFor(() => cdp.eval(`state.marks.some((m) => m.word === 'paragraph')`), { label: '收藏入生词本' });
     const marks1 = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        n: document.querySelectorAll('#markList .mark-chip').length,
+        total: state.marks.length,
+        chips: document.querySelectorAll('#markList .mark-chip').length,
         word: document.querySelector('#markList .mark-chip .w')?.textContent,
         cn: document.querySelector('#markList .mark-chip .m')?.textContent,
         btn: document.querySelector('#popover [data-mark]')?.textContent || '',
-        count: document.getElementById('markCount').textContent
+        count: document.getElementById('markCount').textContent,
+        more: document.querySelector('#markList .mk-more')?.textContent.trim() || ''
       })`)
     );
-    check('收藏后生词本里有这个词', marks1.n === 1 && marks1.word === 'paragraph', JSON.stringify(marks1));
+    check('收藏后生词本里有这个词', marks1.total === marksBefore + 1 && marks1.word === 'paragraph', JSON.stringify(marks1));
     check('生词本记住了释义', marks1.cn.includes('中文释义'), marks1.cn);
     check('收藏后按钮变成「已在生词本」', marks1.btn.includes('已在生词本'), marks1.btn);
-    check('生词本计数同步', marks1.count === '1', marks1.count);
+    check('生词本计数同步', marks1.count === String(marks1.total), JSON.stringify(marks1));
+    check('侧栏最多只露三个词', marks1.chips === Math.min(3, marks1.total), JSON.stringify(marks1));
+    check('多出来的词有「还有 N 个」提示', marks1.total > 3 ? /还有\s*\d+\s*个/.test(marks1.more) : marks1.more === '', JSON.stringify(marks1));
 
     // 生词本要能一眼看全：多行卡片 + 不截断 + 侧栏可滚动
     const markLayout = JSON.parse(
@@ -559,33 +567,33 @@ function seed() {
     check('收藏后正文立刻给这个词上高亮', wrapped.mine > 0 && wrapped.inPara === true, JSON.stringify(wrapped));
     check('变色的词就是刚才点的词', String(wrapped.hw).toLowerCase() === 'paragraph', wrapped.hw);
 
-    // 标一个今日目标词：正文里应该从黄底变成「生词本」样式
+    // 今日目标词因为「导入即入册」本来就在生词本里，点它不该再添一项
     await cdp.eval(`document.querySelector('#articleView mark.word:not(.mine)').click(); 'ok'`);
     await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层' });
-    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 2`), {
-      label: '收藏目标词',
-    });
-    const marks2 = JSON.parse(
+    const targetMark = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        chips: document.querySelectorAll('#markList .mark-chip').length,
-        mine: document.querySelectorAll('#articleView mark.word.mine').length
+        total: state.marks.length,
+        btn: document.querySelector('#popover [data-mark]')?.textContent || '',
+        mine: document.querySelectorAll('#articleView mark.word.mine').length,
+        targetBlue: [...document.querySelectorAll('#articleView mark.word.mine')]
+          .filter((e) => state.targetSet.has(String(e.dataset.hw).toLowerCase())).length
       })`)
     );
-    check('生词本里现在有两项', marks2.chips === 2, JSON.stringify(marks2));
-    check('标过的目标词在正文里换了样式', marks2.mine >= 2, JSON.stringify(marks2));
+    check('今日目标词已经在生词本里', /已在生词本/.test(targetMark.btn), targetMark.btn);
+    check('目标词没有因为已经在册而多出一项', targetMark.total === marksBefore + 1, JSON.stringify(targetMark));
+    check('今日目标词仍是黄色，只有收藏来的生词变蓝', targetMark.mine > 0 && targetMark.targetBlue === 0, JSON.stringify(targetMark));
 
     // 从侧栏移除刚才那个非目标词：正文里要拆回纯文本，不能留下目标词的黄色样式
     await cdp.eval(`document.querySelector('#markList [data-rm="paragraph"]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '移出生词本' });
+    await waitFor(() => cdp.eval(`state.marks.length === ${marksBefore}`), { label: '移出生词本' });
     const afterRemove = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        chips: document.querySelectorAll('#markList .mark-chip').length,
+        total: state.marks.length,
         left: document.querySelectorAll('mark.word[data-hw="paragraph"]').length,
         stillMarked: document.querySelectorAll('#markList .mark-chip .w')[0]?.textContent
       })`)
     );
-    check('能从侧栏把词移出生词本', afterRemove.chips === 1, JSON.stringify(afterRemove));
+    check('能从侧栏把词移出生词本', afterRemove.total === marksBefore, JSON.stringify(afterRemove));
     check('移出后这个词在正文里变回纯文本', afterRemove.left === 0, JSON.stringify(afterRemove));
 
     // ---------- 框选短语查词（真的用鼠标拖选，不是伪造 selection）----------
@@ -674,7 +682,7 @@ function seed() {
       () => cdp.eval(`!document.querySelector('mark.word.mine[data-hw="talk about"]')`),
       { label: '短语移出生词本' }
     );
-    check('短语也能从侧栏移除', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
+    check('短语也能从侧栏移除', (await cdp.eval(`state.marks.some((m) => m.word === 'talk about')`)) === false);
 
     // 选不合法的时候要说话，不能默默什么也不发生（这是用户报的「没反应」）
     await cdp.eval(`(() => {
@@ -818,7 +826,12 @@ function seed() {
     const navState = JSON.parse(
       await cdp.eval(`JSON.stringify({
         active: document.querySelector('.page-nav a[aria-current="page"]')?.dataset.section || '',
-        scrollY: Math.round(window.scrollY)
+        scrollY: Math.round(window.scrollY),
+        archiveTop: Math.round(document.getElementById('archive').getBoundingClientRect().top),
+        todayTop: Math.round(document.getElementById('today').getBoundingClientRect().top),
+        line: Math.round(document.querySelector('.site-header').getBoundingClientRect().height) + 24,
+        scrollH: document.documentElement.scrollHeight,
+        innerH: window.innerHeight
       })`)
     );
     check('滚到历史文章时导航点亮「历史文章」', navState.active === 'archive', JSON.stringify(navState));

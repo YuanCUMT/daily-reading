@@ -271,7 +271,18 @@ async function handleApi(req, res, url) {
     }
 
     const saved = store.saveWords(date, { source: body.source || '手动输入', words });
-    return ok(res, { words: saved, added, skipped, total: saved.words.length, mode: body.mode === 'replace' ? 'replace' : 'merge' });
+    // 导入的单词一律进生词本（已有的只补空字段），所以「我的生词」= 攒下来的全部词
+    const marks = store.addMarks(
+      words.map((w) => ({ word: w.word, cn: w.meaning || '', phonetic: w.phonetic || '', pos: w.pos || '' }))
+    );
+    return ok(res, {
+      words: saved,
+      added,
+      skipped,
+      total: saved.words.length,
+      marksAdded: marks.added,
+      mode: body.mode === 'replace' ? 'replace' : 'merge',
+    });
   }
 
   if (p === '/api/words' && req.method === 'DELETE') {
@@ -361,6 +372,7 @@ async function handleApi(req, res, url) {
     if (Array.isArray(body.words) && body.words.length) {
       words = body.words.map((w) => (typeof w === 'string' ? { word: w } : w));
       store.saveWords(date, { source: '临时输入', words });
+      store.addMarks(words.map((w) => ({ word: w.word, cn: w.meaning || '', phonetic: w.phonetic || '', pos: w.pos || '' })));
     }
     if (!words.length) return fail(res, '这一天还没有单词，先导入或粘贴单词');
 

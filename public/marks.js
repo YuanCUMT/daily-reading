@@ -212,7 +212,7 @@ function syncSubNav() {
     if (section && section.getBoundingClientRect().top <= line) active = a.dataset.jump;
   });
   const doc = document.documentElement;
-  if (window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
+  if (window.scrollY + window.innerHeight >= doc.scrollHeight - 12) {
     const all = document.querySelectorAll('.sub-nav [data-jump]');
     if (all.length) active = all[all.length - 1].dataset.jump;
   }

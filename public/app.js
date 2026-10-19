@@ -230,7 +230,7 @@ function syncNav() {
   });
   // 滚到最底下时，最后一段离基准线还可能差一点，直接点亮它
   const doc = document.documentElement;
-  if (window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
+  if (window.scrollY + window.innerHeight >= doc.scrollHeight - 12) {
     const last = document.querySelectorAll('.page-nav [data-section]');
     if (last.length) active = last[last.length - 1].dataset.section;
   }
@@ -269,11 +269,14 @@ function renderMarks() {
   syncLedger();
   if (!n) {
     box.innerHTML =
-      '<p class="tip" style="margin:0">阅读时点任意单词就能查意思，点「☆ 收藏」收进这里。</p>';
+      '<p class="tip" style="margin:0">导入的单词会自动进这里；阅读时点任意单词、点「☆ 收藏」也能收。</p>';
     return;
   }
-  // 侧栏只露出前三个词，剩下的去生词本页看（面板底下有「去生词本复习 →」）
-  const shown = state.marks.slice(0, SIDEBAR_MARKS);
+  // 侧栏只露出最近三个词；多出来的用一行「⋯」提示去生词本看
+  const ordered = state.marks
+    .slice()
+    .sort((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')));
+  const shown = ordered.slice(0, SIDEBAR_MARKS);
   box.innerHTML = shown
     .map((m) => {
       // 一行一个词太挤，释义/搭配/考研义项全被省略号吃掉。改成多行卡片，内容全部展开。
@@ -295,6 +298,14 @@ function renderMarks() {
       </div>`;
     })
     .join('');
+  // 还有更多：只给一个提示，不铺满整个面板
+  const rest = ordered.length - shown.length;
+  if (rest > 0) {
+    box.insertAdjacentHTML(
+      'beforeend',
+      `<p class="mk-more" aria-label="还有 ${rest} 个生词"><span aria-hidden="true">⋯</span> 还有 ${rest} 个</p>`
+    );
+  }
 }
 
 function renderArticle() {
@@ -314,6 +325,10 @@ function renderArticle() {
   view.hidden = false;
 
   const glossaryMap = new Map(a.glossary.map((g) => [g.word.toLowerCase(), g]));
+  // 今天的靶子词永远用黄色（就算它已经在生词本里），蓝色只留给「收藏来的生词」
+  state.targetSet = new Set(
+    (a.glossary || []).map((g) => String(g.word || '').toLowerCase().replace(/\s+/g, ' '))
+  );
   const pattern = buildWordPattern(a.glossary, state.marks.map((m) => m.word));
 
   const usedCount = (a.usedWords || a.words || []).length;
@@ -443,7 +458,8 @@ function highlight(text, pattern) {
     // 生词本里的词用另一种样式，和今日目标词区分开。
     // 用 stem（不含词尾变化的部分）去比对，否则 take 收藏后 *takes* 不会变蓝
     const key = String(stem || m).toLowerCase().replace(/\s+/g, ' ');
-    const marked = state.marksSet.has(key);
+    const isTarget = state.targetSet && state.targetSet.has(key);
+    const marked = !isTarget && state.marksSet.has(key);
     return `<mark class="word${marked ? ' mine' : ''}" data-hw="${esc(m.replace(/\s+/g, ' '))}">${m}</mark>`;
   });
 }
