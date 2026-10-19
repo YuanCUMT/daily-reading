@@ -16,6 +16,18 @@
   --yellow: #f4c434;
   --note: #f8e6a3;
 
+  /* 旧变量名兼容层：合并主题后 :root 换了 token 名，几个组件还在用老名字。
+     不补这层的话 var() 解析失败，整条声明会被丢掉（卡片会变成没有边框和底色）。 */
+  --surface: var(--paper-white);
+  --surface-2: var(--tint);
+  --line: var(--grid);
+  --ink-soft: var(--muted);
+  --ink-faint: var(--muted);
+  --accent: var(--red);
+  --accent-soft: #f7e3e0;
+  --radius: 4px;
+  --shadow: 0 1px 0 rgba(32, 32, 30, .05);
+
   --sans: "Avenir Next", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
   --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
@@ -708,20 +720,25 @@ kbd {
 }
 
 /* ---------------- 单词本 ---------------- */
-.modal-card.wide { width: min(1000px, 100%); }
-.vocab-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.vocab-main { padding: 26px 0 84px; }
+.vocab-page .marks-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.vocab-page .marks-stats > div { padding-left: 20px; }
 .vocab-bar {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; flex-wrap: wrap; margin-bottom: 12px; flex: none;
+  gap: 14px; flex-wrap: wrap; padding: 0 0 12px; margin-bottom: 20px;
+  border-bottom: 2px solid var(--ink);
 }
-.vocab-tabs { margin-bottom: 0; }
+.vocab-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; }
 .vocab-tabs .count { margin-left: 4px; }
+.vocab-cards, .vocab-rows { padding-top: 4px; }
 /* 不用 .tab 这个类名：导入弹窗里有个全局的 $$('.tab') 处理器会互相踩到 */
 .vtab {
   border: 1px solid var(--line); background: transparent; border-radius: 999px;
   padding: 5px 14px; cursor: pointer; font-size: 13px; color: var(--ink);
 }
 .vtab.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+/* 选中态是黑底，徽标要跟着反色，否则白字压在浅粉底上看不见 */
+.vtab.active .count { background: rgba(255, 255, 255, .22); color: #fff; }
 .vocab-tools { display: flex; gap: 8px; align-items: center; }
 .vocab-tools select, .vocab-tools input {
   padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px;

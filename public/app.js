@@ -47,7 +47,6 @@ async function api(path, options = {}) {
 
 let toastTimer;
 // 侧栏「我的生词」最多露几个词，其余去生词本页看
-const SIDEBAR_MARKS = 3;
 function toast(msg, isError = false) {
   const el = $('#toast');
   el.textContent = msg;
@@ -124,7 +123,6 @@ async function migrateOldStars() {
 }
 
 function renderAll() {
-  renderWords();
   renderArchive();
   renderMarks();
   renderArticle();
@@ -151,24 +149,6 @@ function syncLedger() {
   set('#ledgerUsed', used === null ? '—' : used);
   set('#ledgerMarks', marks);
   set('#ledgerDays', days);
-}
-
-function renderWords() {
-  const words = state.words?.words || [];
-  $('#wordCount').textContent = words.length;
-  const box = $('#wordList');
-  if (!words.length) {
-    box.innerHTML = '<p class="tip" style="margin:0">还没有导入单词。</p>';
-    return;
-  }
-  box.innerHTML = words
-    .map(
-      (w) => `<button class="word-chip" data-word="${esc(w.word)}">
-        <span class="w">${esc(w.word)}</span>
-        <span class="m">${esc(w.meaning || w.phonetic || '')}</span>
-      </button>`
-    )
-    .join('');
 }
 
 function renderArchive() {
@@ -279,12 +259,11 @@ function renderMarks() {
       '<p class="tip" style="margin:0">导入的单词会自动进这里；阅读时点任意单词、点「☆ 收藏」也能收。</p>';
     return;
   }
-  // 侧栏只露出最近三个词；多出来的用一行「⋯」提示去生词本看
+  // 侧栏不再限制条数：列表自己滚，划到多少看多少
   const ordered = state.marks
     .slice()
     .sort((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')));
-  const shown = ordered.slice(0, SIDEBAR_MARKS);
-  box.innerHTML = shown
+  box.innerHTML = ordered
     .map((m) => {
       // 一行一个词太挤，释义/搭配/考研义项全被省略号吃掉。改成多行卡片，内容全部展开。
       const subs = [
@@ -305,214 +284,6 @@ function renderMarks() {
       </div>`;
     })
     .join('');
-  // 还有更多：只给一个提示，不铺满整个面板
-  const rest = ordered.length - shown.length;
-  if (rest > 0) {
-    box.insertAdjacentHTML(
-      'beforeend',
-      `<p class="mk-more" aria-label="还有 ${rest} 个生词"><span aria-hidden="true">⋯</span> 还有 ${rest} 个</p>`
-    );
-  }
-}
-
-// ------------------------------------------------------------------ 单词本
-// 侧栏那两个小框只放「今天的词」和「生词」，词一多就挤成一团。
-// 单词本是完整版：按天汇总所有导入过的词，支持时间 / 字母两种排序，还能搜。
-async function openVocab(tab = 'daily') {
-  state.vocabTab = tab === 'mine' ? 'mine' : 'daily';
-  state.vocabQuery = '';
-  const search = $('#vocabSearch');
-  if (search) search.value = '';
-  try {
-    state.vocab = await api('/api/vocab');
-  } catch (e) {
-    state.vocab = { days: [], total: 0 };
-    toast(e.message || '读取单词本失败', true);
-  }
-  renderVocab();
-  openModal($('#modalVocab'));
-}
-
-/** 生词本里的条目标记成短语：带空格，或者词性是 phr. */
-const isPhraseMark = (m) => /\s/.test(String(m.word || '')) || String(m.pos || '').toLowerCase() === 'phr.';
-
-function vocabItems() {
-  if (state.vocabTab === 'mine' || state.vocabTab === 'phrases') {
-    const wantPhrase = state.vocabTab === 'phrases';
-    return state.marks
-      .filter((m) => isPhraseMark(m) === wantPhrase)
-      .map((m) => ({
-        word: m.word,
-        phonetic: m.phonetic || '',
-        pos: m.pos || '',
-        meaning: m.cn || '',
-        collocation: m.collocation || '',
-        examSense: m.examSense || '',
-        note: m.note || '',
-        time: m.addedAt || m.articleDate || '',
-        date: String(m.addedAt || '').slice(0, 10) || m.articleDate || '',
-        removable: true,
-      }));
-  }
-  const out = [];
-  for (const day of state.vocab?.days || []) {
-    for (const w of day.words || []) {
-      out.push({
-        word: w.word,
-        phonetic: w.phonetic || '',
-        pos: w.pos || '',
-        meaning: w.meaning || '',
-        time: day.date,
-        date: day.date,
-        removable: false,
-      });
-    }
-  }
-  return out;
-}
-
-const byAlpha = (a, b) => a.word.localeCompare(b.word, 'en', { sensitivity: 'base' });
-
-function sortedVocabItems() {
-  const all = vocabItems();
-  const q = state.vocabQuery.trim().toLowerCase();
-  const list = q
-    ? all.filter((it) => it.word.toLowerCase().includes(q) || it.meaning.toLowerCase().includes(q))
-    : all;
-  const byTimeAsc = (a, b) => String(a.time).localeCompare(String(b.time)) || byAlpha(a, b);
-  const byTimeDesc = (a, b) => String(b.time).localeCompare(String(a.time)) || byAlpha(a, b);
-  if (state.vocabSort === 'alpha') return list.slice().sort(byAlpha);
-  if (state.vocabSort === 'alpha-desc') return list.slice().sort((a, b) => byAlpha(b, a));
-  if (state.vocabSort === 'time-asc') return list.slice().sort(byTimeAsc);
-  return list.slice().sort(byTimeDesc);
-}
-
-function vocabCard(it, showDate) {
-  const subs = [
-    it.collocation ? `<div class="sub"><i>搭配</i>${esc(it.collocation)}</div>` : '',
-    it.examSense ? `<div class="sub"><i>考研常考</i>${esc(it.examSense)}</div>` : '',
-    it.note ? `<div class="sub"><i>注释</i>${esc(it.note)}</div>` : '',
-  ].join('');
-  return `<div class="vcard" data-word="${esc(it.word)}">
-    <div class="top">
-      <span class="w">${esc(it.word)}</span>
-      ${it.phonetic ? `<span class="ph">${esc(it.phonetic)}</span>` : ''}
-      ${it.pos ? `<span class="pos">${esc(it.pos)}</span>` : ''}
-    </div>
-    ${it.meaning ? `<div class="m">${esc(it.meaning)}</div>` : ''}
-    ${subs}
-    ${showDate && it.date ? `<div class="foot">${it.removable ? '收于 ' : ''}${esc(it.date)}</div>` : ''}
-    ${it.removable ? `<span class="rm" data-vrm="${esc(it.word)}" title="移出生词本">✕</span>` : ''}
-  </div>`;
-}
-
-function renderVocab() {
-  const tab = state.vocabTab === 'phrases' ? 'phrases' : state.vocabTab === 'mine' ? 'mine' : 'daily';
-  const daily = tab === 'daily';
-  const phraseMarks = state.marks.filter(isPhraseMark).length;
-  $('#vtabDailyCount').textContent = state.vocab?.total ?? 0;
-  $('#vtabMineCount').textContent = state.marks.length - phraseMarks;
-  $('#vtabPhraseCount').textContent = phraseMarks;
-  document.querySelectorAll('#modalVocab [data-vtab]').forEach((b) => {
-    b.classList.toggle('active', b.dataset.vtab === tab);
-  });
-  const sel = $('#vocabSort');
-  if (sel) sel.value = state.vocabSort;
-
-  // 「补全释义」只在每日单词页、且确实还缺释义时出现
-  const missing = state.vocab?.missing ?? 0;
-  const fillBtn = $('#btnFillMeaning');
-  if (fillBtn) {
-    fillBtn.hidden = !daily || !missing;
-    fillBtn.textContent = `补全释义（${missing}）`;
-    fillBtn.disabled = Boolean(state.filling);
-  }
-
-  const items = sortedVocabItems();
-  const box = $('#vocabBody');
-  if (!items.length) {
-    const q = state.vocabQuery.trim();
-    box.innerHTML = `<p class="tip empty-tip">${
-      q
-        ? `没有匹配「${esc(q)}」的词。`
-        : daily
-          ? '还没有导入过单词。点右上角「导入单词」开始。'
-          : tab === 'phrases'
-            ? '还没有收藏过短语。在正文里拖选几个词（比如 in terms of），松手后点「☆ 收藏短语」。'
-            : '生词本还是空的。阅读时点任意单词，再点「☆ 收藏」就能收进来。'
-    }</p>`;
-    return;
-  }
-
-  // 按时间排时顺手按天分组：一眼看出哪天加了哪些词
-  const grouped = daily && state.vocabSort.startsWith('time-');
-  const perDay = new Map();
-  if (grouped) for (const it of items) perDay.set(it.date, (perDay.get(it.date) || 0) + 1);
-
-  let html = '';
-  let lastDate = null;
-  for (const it of items) {
-    if (grouped && it.date !== lastDate) {
-      lastDate = it.date;
-      html += `<div class="vgroup"><b>${esc(it.date)}</b><span>${perDay.get(it.date)} 个</span></div>`;
-    }
-    html += vocabCard(it, !grouped);
-  }
-  box.innerHTML = html;
-}
-
-function setVocabStatus(text, isError = false) {
-  const el = $('#vocabStatus');
-  if (!el) return;
-  el.hidden = !text;
-  el.textContent = text || '';
-  el.classList.toggle('err', Boolean(isError));
-}
-
-/**
- * 补全释义：一次只让后端处理一批（40 个），前端循环，
- * 这样有进度、也不会因为一次请求太久被浏览器掐断。
- */
-async function fillMissingMeanings() {
-  if (state.filling) return;
-  const missing = state.vocab?.missing ?? 0;
-  if (!missing) return;
-  const rounds = Math.ceil(missing / 40);
-  const ok = confirm(
-    `有 ${missing} 个词还没有中文释义。\n\n` +
-      `要调用模型补全吗？大约 ${rounds} 次请求（${Math.min(missing, 40)} 个一批），` +
-      `补过的会存进本地词典缓存，以后再也不会重复花钱。`
-  );
-  if (!ok) return;
-
-  state.filling = true;
-  renderVocab();
-  let done = 0;
-  try {
-    for (let round = 0; round < 15; round++) {
-      setVocabStatus(`正在补第 ${done + 1} 个开始的这一批……（已补 ${done}，还剩 ${missing - done}）`);
-      const r = await api('/api/vocab/fill', { method: 'POST', body: { limit: 40 }, timeoutMs: 180000 });
-      done += r.filled || 0;
-      state.vocab = await api('/api/vocab');
-      renderVocab();
-      setVocabStatus(`已补 ${done} 个，还剩 ${r.remaining} 个……`);
-      if (!r.remaining) break;
-      if (!r.filled) {
-        setVocabStatus('模型这次没有返回新的释义，先停下了。过会儿再试一次。', true);
-        break;
-      }
-    }
-    if (done) {
-      setVocabStatus(`这次补全了 ${done} 个词的释义。`);
-      toast(`补全了 ${done} 个词的释义`);
-    }
-  } catch (err) {
-    setVocabStatus(err.message || '补释义失败', true);
-    toast(err.message || '补释义失败', true);
-  } finally {
-    state.filling = false;
-    renderVocab();
-  }
 }
 
 function renderArticle() {
@@ -769,7 +540,7 @@ function bindArticleEvents(glossaryMap, a) {
     }
   });
 
-  // 注：#articleView / #wordList / #markList 的点击处理绑在 bindTop() 里只绑一次。
+  // 注：#articleView / #markList 的点击处理绑在 bindTop() 里只绑一次。
   // 这里如果每渲染一次就 addEventListener，会叠出一堆重复处理器（一次点击查好几次词）。
 
   state.glossaryMap = glossaryMap;
@@ -1492,42 +1263,6 @@ function bindTop() {
   const heroGenerate = $('#btnHeroGenerate');
   if (heroGenerate) heroGenerate.onclick = () => generate();
 
-  // ---- 单词本 ----
-  $('#btnVocab').onclick = () => openVocab('daily');
-  $('#btnAllWords').onclick = () => openVocab('daily');
-  $('#btnAllMarks').onclick = () => openVocab('mine');
-  $('#modalVocab').addEventListener('click', async (e) => {
-    const tab = e.target.closest('[data-vtab]');
-    if (tab) {
-      state.vocabTab = ['mine', 'phrases'].includes(tab.dataset.vtab) ? tab.dataset.vtab : 'daily';
-      state.vocabQuery = '';
-      const search = $('#vocabSearch');
-      if (search) search.value = '';
-      renderVocab();
-      return;
-    }
-    const rm = e.target.closest('[data-vrm]');
-    if (rm) {
-      e.stopPropagation();
-      try {
-        await unmarkWord(rm.dataset.vrm);
-        renderVocab();
-        toast(`已移出生词本：${rm.dataset.vrm}`);
-      } catch (err) {
-        toast(err.message || '移出失败', true);
-      }
-    }
-  });
-  $('#vocabSort').addEventListener('change', (e) => {
-    state.vocabSort = e.target.value;
-    renderVocab();
-  });
-  $('#vocabSearch').addEventListener('input', (e) => {
-    state.vocabQuery = e.target.value;
-    renderVocab();
-  });
-  $('#btnFillMeaning').onclick = () => fillMissingMeanings();
-
   $('#empty')?.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
@@ -1538,18 +1273,6 @@ function bindTop() {
   $('#btnGenerate').onclick = generate;
 
   // 一键切模式：改完立刻存，但不会自动花你的额度重新生成
-  $('#btnClearWords').onclick = async () => {
-    const n = state.words?.words?.length || 0;
-    if (!n) return toast('今天还没有单词', true);
-    if (!confirm(`清空 ${state.date} 的单词表（共 ${n} 个）？\n\n只清单词，已生成的文章不受影响。`)) return;
-    try {
-      await api(`/api/words?date=${state.date}`, { method: 'DELETE' });
-      toast('已清空');
-      await load(state.date);
-    } catch (e) {
-      toast(e.message, true);
-    }
-  };
   $('#btnSettings').onclick = () => {
     fillSettings();
     openModal($('#modalSettings'));
@@ -1586,11 +1309,6 @@ function bindTop() {
 
   // 下面这几块容器本身不会被重渲染，处理器只能绑一次，否则会叠加
   $('#articleView').addEventListener('click', onArticleClick);
-
-  $('#wordList').onclick = (e) => {
-    const chip = e.target.closest('.word-chip');
-    if (chip) openWord(e.clientX, e.clientY, chip.dataset.word, chip);
-  };
 
   $('#markList').onclick = async (e) => {
     const rm = e.target.closest('[data-rm]');

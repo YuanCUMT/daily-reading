@@ -72,6 +72,11 @@ const MIME = {
 };
 
 function serveStatic(req, res, pathname) {
+  // 旧链接兼容：生词本页已并入单词本
+  if (pathname === '/marks.html' || pathname === '/marks') {
+    res.writeHead(302, { Location: '/vocab.html?tab=mine' });
+    return res.end();
+  }
   const rel = pathname === '/' ? '/index.html' : pathname;
   const target = path.join(PUBLIC_DIR, path.normalize(rel).replace(/^([/\\])+/, ''));
   if (!target.startsWith(PUBLIC_DIR)) return fail(res, 'forbidden', 403);

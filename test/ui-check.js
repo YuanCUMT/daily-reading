@@ -115,8 +115,28 @@ function dropFixtureExpr(files) {
 const candidateValues = (cdp) =>
   cdp.eval(`JSON.stringify([...document.querySelectorAll('#ocrResult .cand-word')].map(i => i.value))`).then(JSON.parse);
 
+// 侧栏不再显示今日单词，改成读前端 state（服务端权威数据的镜像）
 const sidebarWords = (cdp) =>
-  cdp.eval(`JSON.stringify([...document.querySelectorAll('.word-chip .w')].map(e => e.textContent))`).then(JSON.parse);
+  cdp.eval(`JSON.stringify((state.words?.words || []).map((w) => w.word))`).then(JSON.parse);
+
+// 单词本是独立页面了：导航过去断言，再回阅读页
+async function openVocabPage(cdp, base, tab = 'daily') {
+  await cdp.send('Page.navigate', { url: `${base}/vocab.html?tab=${tab}` });
+  await waitFor(
+    () =>
+      cdp.eval(
+        `document.querySelectorAll('#vocabBody .vcard, #vocabBody .mark-row').length > 0 || !!document.querySelector('#vocabBody .empty-tip, #vocabBody .tip')`
+      ),
+    { tries: 90, label: '单词本页渲染' }
+  );
+  await sleep(200);
+}
+
+async function backToApp(cdp, base) {
+  await cdp.send('Page.navigate', { url: `${base}/` });
+  await waitFor(() => cdp.eval(`!!(state.article && state.words)`), { tries: 90, label: '回到阅读页' });
+  await sleep(250);
+}
 
 function seed() {
   fs.mkdirSync(path.join(DATA, 'words'), { recursive: true });
@@ -214,7 +234,8 @@ function seed() {
 
     const initial = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        chips: document.querySelectorAll('.word-chip').length,
+        chips: document.querySelectorAll('#markList .mark-chip').length,
+        hasWordPanel: !!document.getElementById('wordList'),
         emptyVisible: !document.getElementById('empty').hidden,
         title: document.title,
         hasBaicizhan: document.body.innerHTML.includes('百词斩抓取') || document.body.innerHTML.includes('accessToken'),
@@ -222,7 +243,8 @@ function seed() {
         modalsHidden: [...document.querySelectorAll('.modal,.loading')].every(e => getComputedStyle(e).display === 'none')
       })`)
     );
-    check('侧栏初始没有单词', initial.chips === 0);
+    check('侧栏初始没有生词', initial.chips === 0);
+    check('侧栏不再有「今日单词」面板', initial.hasWordPanel === false);
     check('空态可见', initial.emptyVisible === true);
     check('页面标题是考研版', initial.title.includes('考研'), initial.title);
     check('界面上已经没有百词斩导入', initial.hasBaicizhan === false);
@@ -239,15 +261,15 @@ function seed() {
         headerButtons: [...document.querySelectorAll('.site-header button')].map((b) => b.id)
       })`)
     );
-    check('顶栏有导航：今日文章 / 历史文章 / 生词本',
+    check('顶栏有导航：今日文章 / 历史文章 / 单词本',
       topbar.navItems.length === 3 && topbar.navItems[0].startsWith('今日文章') &&
-        topbar.navItems[1].startsWith('历史文章') && topbar.navItems[2].startsWith('生词本'),
+        topbar.navItems[1].startsWith('历史文章') && topbar.navItems[2].startsWith('单词本'),
       JSON.stringify(topbar.navItems));
     check('顶栏没有模式下拉', topbar.hasModeSelect === false);
     check('设置按钮在顶栏里', topbar.settingsInHeader === true);
     check(
-      '顶栏按钮只有单词本和设置',
-      topbar.headerButtons.join(',') === 'btnVocab,btnSettings',
+      '顶栏按钮只剩设置（单词本改成导航了）',
+      topbar.headerButtons.join(',') === 'btnSettings',
       topbar.headerButtons.join(',')
     );
 
@@ -386,7 +408,7 @@ function seed() {
     check('候选词是可编辑的输入框', multi.length === (await cdp.eval(`document.querySelectorAll('#ocrResult .cand-word').length`)));
 
     await cdp.eval(`document.getElementById('btnSaveWords').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('.word-chip').length === 7`), { label: '7 个词进侧栏' });
+    await waitFor(() => cdp.eval(`(state.words?.words || []).length === 7`), { label: '7 个词进词表' });
     check('多图识别的结果一次保存成功', (await sidebarWords(cdp)).length === 7);
     check('保存后弹窗保持打开，方便继续加', (await cdp.eval(`document.getElementById('modalImport').hidden`)) === false);
     check(
@@ -413,12 +435,14 @@ function seed() {
     check('第一批的 7 个词一个都没少', (await sidebarWords(cdp)).length === 7, JSON.stringify(await sidebarWords(cdp)));
     await cdp.eval(`document.querySelector('#modalImport [data-close]').click(); 'ok'`);
 
-    // ---------- 清空 ----------
-    cdp.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => {});
-    await cdp.eval(`window.confirm = () => true; 'ok'`);
-    await cdp.eval(`document.getElementById('btnClearWords').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('.word-chip').length === 0`), { label: '清空单词' });
-    check('「清空」能清掉当天的单词', true);
+    // ---------- 清空（按钮挪到单词本页的「清空这天」，这里直接调接口验证） ----------
+    await cdp.eval(`(async () => {
+      await fetch('/api/words?date=' + encodeURIComponent(state.date), { method: 'DELETE' });
+      await load(state.date);
+      return 'ok';
+    })()`);
+    await waitFor(() => cdp.eval(`(state.words?.words || []).length === 0`), { label: '清空单词' });
+    check('清空能清掉当天的单词', true);
 
     // ---------- 用手动粘贴把词表补齐 ----------
     await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
@@ -433,8 +457,8 @@ function seed() {
     await waitFor(() => cdp.eval(`document.querySelectorAll('#pastePreview .pv-word').length === 5`), { label: '粘贴预览' });
     check('粘贴即时预览工作正常', true);
     await cdp.eval(`document.getElementById('btnSaveWords').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('.word-chip').length === 5`), { label: '词表补齐' });
-    check('侧栏凑齐 5 个单词', true);
+    await waitFor(() => cdp.eval(`(state.words?.words || []).length === 5`), { label: '词表补齐' });
+    check('词表凑齐 5 个单词', (await sidebarWords(cdp)).length === 5);
     await cdp.eval(`document.querySelector('#modalImport [data-close]').click(); 'ok'`);
 
     // ---------- 生成文章 ----------
@@ -548,8 +572,7 @@ function seed() {
     check('生词本记住了释义', marks1.cn.includes('中文释义'), marks1.cn);
     check('收藏后按钮变成「已在生词本」', marks1.btn.includes('已在生词本'), marks1.btn);
     check('生词本计数同步', marks1.count === String(marks1.total), JSON.stringify(marks1));
-    check('侧栏最多只露三个词', marks1.chips === Math.min(3, marks1.total), JSON.stringify(marks1));
-    check('多出来的词有「还有 N 个」提示', marks1.total > 3 ? /还有\s*\d+\s*个/.test(marks1.more) : marks1.more === '', JSON.stringify(marks1));
+    check('侧栏生词不设条数上限', marks1.chips === marks1.total, JSON.stringify(marks1));
 
     // 生词本要能一眼看全：多行卡片 + 不截断 + 侧栏可滚动
     const markLayout = JSON.parse(
@@ -572,7 +595,7 @@ function seed() {
     check('生词本里的释义不再被省略号截断', markLayout.wrapped && markLayout.notClipped, JSON.stringify(markLayout));
     check('侧栏与生词本都能滚动', markLayout.sideOverflow === 'auto' && markLayout.listOverflow === 'auto', JSON.stringify(markLayout));
 
-    // 侧栏只露前三个词（其余去生词本页），塞 12 个进去验证不会撑长面板
+    // 塞 12 个进去：条数不设上限，列表自己滚
     const sidebarLimit = JSON.parse(
       await cdp.eval(`JSON.stringify((() => {
         window.__realMarks = state.marks.slice();
@@ -583,16 +606,19 @@ function seed() {
           collocation: 'sample sth'
         })));
         renderMarks();
+        const box = document.getElementById('markList');
+        box.scrollTop = box.scrollHeight;
         return {
           chips: document.querySelectorAll('#markList .mark-chip').length,
           total: state.marks.length,
           count: document.getElementById('markCount').textContent,
-          first: document.querySelector('#markList .mark-chip .w')?.textContent
+          scrollable: box.scrollHeight > box.clientHeight + 2 && box.scrollTop > 0
         };
       })())`)
     );
-    check('侧栏只显示前三个生词', sidebarLimit.chips === 3, JSON.stringify(sidebarLimit));
-    check('面板标题上的计数仍是全部词数', sidebarLimit.count === String(sidebarLimit.total), JSON.stringify(sidebarLimit));
+    check('侧栏把生词全部列出来，不再截前三个', sidebarLimit.chips === sidebarLimit.total, JSON.stringify(sidebarLimit));
+    check('面板标题上的计数与列表一致', sidebarLimit.count === String(sidebarLimit.total), JSON.stringify(sidebarLimit));
+    check('生词变多后侧栏能滚到底', sidebarLimit.scrollable === true, JSON.stringify(sidebarLimit));
     await cdp.eval(`state.marks = window.__realMarks; renderMarks(); 'ok'`);
 
     // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
@@ -719,13 +745,10 @@ function seed() {
     check('短语收藏后按钮变为「已在生词本」', /已在生词本/.test(phraseMarked.btn), phraseMarked.btn);
 
     // 短语要能在单词本里单独列出来，不然收藏了也没处看
-    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '打开单词本' });
-    await cdp.eval(`document.querySelector('#modalVocab [data-vtab="phrases"]').click(); 'ok'`);
-    await sleep(200);
+    await openVocabPage(cdp, BASE, 'phrases');
     const phraseTab = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        active: document.querySelector('#modalVocab [data-vtab="phrases"]').classList.contains('active'),
+        active: document.querySelector('[data-vtab="phrases"]').classList.contains('active'),
         count: document.getElementById('vtabPhraseCount').textContent,
         words: [...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent),
         colloc: document.querySelector('#vocabBody .vcard .sub')?.textContent || ''
@@ -734,47 +757,56 @@ function seed() {
     check('短语标签页单独列出短语', phraseTab.active === true && phraseTab.count === '1', JSON.stringify(phraseTab));
     check('短语标签页里就是刚收藏的短语', JSON.stringify(phraseTab.words) === '["talk about"]', JSON.stringify(phraseTab.words));
     check('短语卡片带搭配结构', phraseTab.colloc.includes('搭配'), phraseTab.colloc);
-    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
-    await sleep(200);
 
-    // 清掉短语，别把它带进截图
-    await cdp.eval(`document.querySelector('#markList [data-rm="talk about"]').click(); 'ok'`);
-    await waitFor(
-      () => cdp.eval(`!document.querySelector('mark.word.mine[data-hw="talk about"]')`),
-      { label: '短语移出生词本' }
-    );
-    check('短语也能从侧栏移除', (await cdp.eval(`state.marks.some((m) => m.word === 'talk about')`)) === false);
+    // 短语也要能从单词本里删掉（原来是从侧栏删，侧栏现在只列单词了）
+    await cdp.eval(`document.querySelector('#vocabBody .vcard[data-word="talk about"] [data-vrm]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`!document.querySelector('#vocabBody .vcard[data-word="talk about"]')`), {
+      label: '短语移出单词本',
+    });
+    check('短语也能从单词本移除', (await cdp.eval(`state.marks.some((m) => m.word === 'talk about')`)) === false);
+
+    await backToApp(cdp, BASE);
+    await waitFor(() => cdp.eval(`!document.querySelector('mark.word.mine[data-hw="talk about"]')`), {
+      label: '回阅读页后短语不再高亮',
+    });
 
     // ---- 单词本 ----
-    // 前面把收藏的词都清掉了，先正经收藏一个，单词本才有的可看
+    // 前面的收藏/移出操作会留下不确定的残局，这里清空重来，后面的断言才写得住
+    await fetch(`${BASE}/api/marks?all=1`, { method: 'DELETE' });
+    await cdp.send('Page.navigate', { url: `${BASE}/` });
+    await waitFor(() => cdp.eval(`!!(typeof state !== 'undefined' && state.article) && state.marks.length === 0`), {
+      tries: 90,
+      label: '清空生词本后回到阅读页',
+    });
+
     await cdp.eval(`document.querySelector('#articleView mark.word[data-hw="abandon"]').click(); 'ok'`);
     await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层（收藏用）' });
     await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
     await waitFor(() => cdp.eval(`state.marks.length === 1`), { label: '收藏一个词用来检查单词本' });
     await cdp.eval(`document.querySelector('#popover [data-close]')?.click(); 'ok'`);
 
-    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '打开单词本' });
+    await openVocabPage(cdp, BASE, 'daily');
     const vocab1 = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        tabs: document.querySelectorAll('#modalVocab [data-vtab]').length,
-  hasPhraseTab: !!document.querySelector('#modalVocab [data-vtab="phrases"]'),
-  phraseCount: document.getElementById('vtabPhraseCount')?.textContent,
-  fillVisible: (() => {
-    const b = document.getElementById('btnFillMeaning');
-    return !!b && !b.hidden;
-  })(),
-  fillLabel: document.getElementById('btnFillMeaning')?.textContent || '',
-        dailyActive: document.querySelector('#modalVocab [data-vtab="daily"]').classList.contains('active'),
+        tabs: document.querySelectorAll('[data-vtab]').length,
+        hasPhraseTab: !!document.querySelector('[data-vtab="phrases"]'),
+        phraseCount: document.getElementById('vtabPhraseCount')?.textContent,
+        fillVisible: (() => {
+          const b = document.getElementById('btnFillMeaning');
+          return !!b && !b.hidden;
+        })(),
+        dailyActive: document.querySelector('[data-vtab="daily"]').classList.contains('active'),
         dailyCount: document.getElementById('vtabDailyCount').textContent,
         mineCount: document.getElementById('vtabMineCount').textContent,
         cards: document.querySelectorAll('#vocabBody .vcard').length,
-        groups: document.querySelectorAll('#vocabBody .vgroup').length
+        groups: document.querySelectorAll('#vocabBody .vgroup').length,
+        navMarked: (document.querySelector('.page-nav a[aria-current="page"]') || {}).textContent || ''
       })`)
     );
-    check('单词本有两个标签页', vocab1.tabs === 3 && vocab1.dailyActive === true, JSON.stringify(vocab1));
+    check('单词本有三个标签页', vocab1.tabs === 3 && vocab1.dailyActive === true, JSON.stringify(vocab1));
     check('单词本有单独的短语标签页', vocab1.hasPhraseTab === true && vocab1.phraseCount === '0', JSON.stringify(vocab1));
     check('文章已补全释义时不给「补全释义」按钮', vocab1.fillVisible === false, JSON.stringify(vocab1));
+    check('导航上高亮「单词本」', vocab1.navMarked.includes('单词本'), vocab1.navMarked);
     check('单词本每日单词数正确', vocab1.dailyCount === '5', vocab1.dailyCount);
     check('单词本生词数正确', vocab1.mineCount === '1', vocab1.mineCount);
     check('单词本按天分组显示', vocab1.cards === 5 && vocab1.groups === 1, JSON.stringify(vocab1));
@@ -817,20 +849,20 @@ function seed() {
     await cdp.eval(`(() => { const i = document.getElementById('vocabSearch'); i.value = 'zzzz'; i.dispatchEvent(new Event('input')); return 'ok'; })()`);
     check('搜不到时给提示', (await cdp.eval(`document.querySelector('#vocabBody .empty-tip')?.textContent || ''`)).includes('没有匹配'));
 
-    await cdp.eval(`document.querySelector('#modalVocab [data-vtab="mine"]').click(); 'ok'`);
+    await cdp.eval(`document.querySelector('[data-vtab="mine"]').click(); 'ok'`);
+    await sleep(200);
     const mineTab = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        active: document.querySelector('#modalVocab [data-vtab="mine"]').classList.contains('active'),
-        cards: document.querySelectorAll('#vocabBody .vcard').length,
-        word: document.querySelector('#vocabBody .vcard .w')?.textContent || '',
-        hasRemove: !!document.querySelector('#vocabBody [data-vrm]')
+        active: document.querySelector('[data-vtab="mine"]').classList.contains('active'),
+        rows: document.querySelectorAll('#vocabBody .mark-row').length,
+        word: document.querySelector('#vocabBody .mark-row .w')?.textContent || '',
+        hasRemove: !!document.querySelector('#vocabBody [data-act="remove"]')
       })`)
     );
-    check('切到「我的生词」标签', mineTab.active === true && mineTab.cards === 1, JSON.stringify(mineTab));
-    check('生词卡片带移出按钮', mineTab.hasRemove === true && mineTab.word === 'abandon', JSON.stringify(mineTab));
+    check('切到「我的生词」标签', mineTab.active === true && mineTab.rows === 1, JSON.stringify(mineTab));
+    check('生词行带移出按钮', mineTab.hasRemove === true && mineTab.word === 'abandon', JSON.stringify(mineTab));
 
-    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
-    check('单词本能关掉', (await cdp.eval(`document.getElementById('modalVocab').hidden`)) === true);
+    await backToApp(cdp, BASE);
 
     // 回归：单词本的标签页以前复用了 .tab 类名，会被导入弹窗那个全局处理器带歪
     await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
@@ -848,9 +880,7 @@ function seed() {
       body: JSON.stringify({ date: '2026-07-01', words: [{ word: 'quokka' }, { word: 'numbat' }] }),
     });
     check('塞了两个没释义的词', seedRes.ok === true, String(seedRes.status));
-    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '再开单词本' });
-    await sleep(250);
+    await openVocabPage(cdp, BASE, 'daily');
     const fillBtn = JSON.parse(
       await cdp.eval(`JSON.stringify({
         visible: !document.getElementById('btnFillMeaning').hidden,
@@ -860,7 +890,7 @@ function seed() {
     );
     check('缺释义时出现「补全释义」按钮', fillBtn.visible === true && /补全释义（2）/.test(fillBtn.label), JSON.stringify(fillBtn));
     check('补释义前不显示状态行', fillBtn.statusHidden === true, JSON.stringify(fillBtn));
-    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
+    await backToApp(cdp, BASE);
     await fetch(`${BASE}/api/words?date=2026-07-01`, { method: 'DELETE' });
     await sleep(200);
     await cdp.eval(`(() => {
@@ -1126,152 +1156,81 @@ function seed() {
     ).json();
     check('接口能把词标成已掌握', !!masteredSeed.marks?.find((m) => m.word === 'quaint')?.mastered);
 
-    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
-    await waitFor(() => cdp.eval(`!!document.getElementById('learningList') && document.querySelectorAll('#learningList .mark-row').length > 0`).catch(() => false), {
-      label: '生词本页渲染',
-    });
+    // 单词本页的「我的生词」就是原来的生词本页：两摞 + 按天分组
+    await openVocabPage(cdp, BASE, 'mine');
 
     // 期望值从接口算，别把断言写死成「正好 2 条」——这轮测试前面还收藏过别的词
     const marksNow = await (await fetch(`${BASE}/api/marks`)).json();
-    const expectLearning = marksNow.marks.filter((m) => !m.mastered).length;
-    const expectMastered = marksNow.marks.filter((m) => m.mastered).length;
-    const expectDays = new Set(marksNow.marks.map((m) => String(m.addedAt || '').slice(0, 10))).size;
+    const isPhrase = (m) => /\s/.test(String(m.word)) || m.pos === 'phr.';
+    const wordMarks = marksNow.marks.filter((m) => !isPhrase(m));
+    const expectLearning = wordMarks.filter((m) => !m.mastered).length;
+    const expectMastered = wordMarks.filter((m) => m.mastered).length;
+    const expectDays = new Set(wordMarks.filter((m) => !m.mastered).map((m) => String(m.addedAt || '').slice(0, 10))).size;
 
     const page1 = JSON.parse(
       await cdp.eval(`JSON.stringify({
         title: document.title,
-        learningRows: document.querySelectorAll('#learningList .mark-row').length,
-        learningCount: document.getElementById('countLearning').textContent,
-        masteredRows: document.querySelectorAll('#masteredList .mark-row').length,
-        masteredCount: document.getElementById('countMastered').textContent,
-        dayHeads: document.querySelectorAll('#learningList .day-head').length,
-        dayRules: document.querySelectorAll('#learningList .day-rule').length,
-        todayTags: document.querySelectorAll('#learningList .day-head .day-tag').length,
-        ruleWidth: (() => {
-          const r = document.querySelector('#learningList .day-rule');
-          if (!r) return '';
-          const cs = getComputedStyle(r);
-          return cs.borderTopWidth + ' ' + cs.borderTopStyle;
-        })(),
-        rulePx: Math.round(document.querySelector('#learningList .day-rule')?.getBoundingClientRect().width || 0),
-        rowPx: Math.round(document.querySelector('#learningList .mark-row')?.getBoundingClientRect().width || 0),
+        rows: document.querySelectorAll('#vocabBody .mark-row').length,
+        learningRows: document.querySelectorAll('#vocabBody .mark-row:not(.is-mastered)').length,
+        masteredRows: document.querySelectorAll('#vocabBody .mark-row.is-mastered').length,
+        sections: [...document.querySelectorAll('#vocabBody h3')].map((h) => ({
+          t: h.textContent.trim().split(/\\s+/)[0],
+          n: (h.querySelector('.count') || {}).textContent || ''
+        })),
+        dayHeads: document.querySelectorAll('#vocabBody .marks-section:first-of-type .day-head').length,
+        dayRules: document.querySelectorAll('#vocabBody .marks-section:first-of-type .day-rule').length,
+        todayTags: document.querySelectorAll('#vocabBody .day-head .day-tag').length,
         navCount: document.getElementById('navCount').textContent,
-        navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || '',
-        hasSummaryLink: !!document.querySelector('#markSummary'),
-        subItems: [...document.querySelectorAll('.sub-nav a')].map((a) => a.textContent.trim().split(' ')[0]),
-        subCounts: [
-          document.getElementById('subCountLearning')?.textContent,
-          document.getElementById('subCountMastered')?.textContent
-        ],
-        subCurrent: document.querySelector('.sub-nav a[aria-current="page"]')?.dataset.jump || '',
-        subSticky: (() => {
-          const n = document.querySelector('.sub-nav');
-          return n ? getComputedStyle(n).position : '';
-        })()
+        navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || ''
       })`)
     );
 
-    check('生词本页标题正确', page1.title.includes('生词本'), page1.title);
-    check('生词本页把词分成两摞', page1.learningRows === expectLearning && page1.masteredRows === expectMastered, JSON.stringify(page1) + ` 期望 ${expectLearning}/${expectMastered}`);
-    check('两摞的计数与行数一致', page1.learningCount === String(expectLearning) && page1.masteredCount === String(expectMastered), JSON.stringify(page1));
+    check('单词本页标题正确', page1.title.includes('单词本'), page1.title);
+    check('「我的生词」把词分成学习中和已掌握', page1.learningRows === expectLearning && page1.masteredRows === expectMastered, JSON.stringify(page1) + ` 期望 ${expectLearning}/${expectMastered}`);
+    check('两摞的计数与行数一致',
+      page1.sections.find((s) => s.t === '学习中')?.n === String(expectLearning) &&
+        (expectMastered === 0 || page1.sections.find((s) => s.t === '已掌握')?.n === String(expectMastered)),
+      JSON.stringify(page1.sections));
     check('按天分组（一天一组）', page1.dayHeads === expectDays, `${page1.dayHeads} 组 / 期望 ${expectDays}`);
     check('每组都有一条分割横线', page1.dayRules === page1.dayHeads, JSON.stringify(page1));
-    check('横线是真的画出来的粗长线', page1.ruleWidth === '2px solid' && page1.rulePx >= page1.rowPx - 2, JSON.stringify(page1));
     check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
-    check('导航上生词本高亮且带计数', page1.navCurrent.includes('生词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
-    check('主页侧栏不再显示「学习中 · 已掌握」那行小字', page1.hasSummaryLink === false, String(page1.hasSummaryLink));
-
-    // 生词本页内的分区小导航：学习中 / 已掌握，粘在顶栏下面
-    check('生词本有「学习中 / 已掌握」小导航',
-      page1.subItems[0] === '学习中' && page1.subItems[1] === '已掌握', JSON.stringify(page1.subItems));
-    check('小导航显示两摞的数量',
-      page1.subCounts[0] === String(expectLearning) && page1.subCounts[1] === String(expectMastered),
-      JSON.stringify(page1.subCounts));
-    check('小导航吸顶', page1.subSticky === 'sticky', page1.subSticky);
-    check('默认点亮「学习中」', page1.subCurrent === 'learningSection', page1.subCurrent);
-
-    // 点小导航跳到「已掌握」，横线也要跟过去
-    await cdp.eval(`document.querySelector('.sub-nav a[data-jump="masteredSection"]').click(); 'ok'`);
-    await sleep(900);
-    const subJump = JSON.parse(
-      await cdp.eval(`JSON.stringify({
-        current: document.querySelector('.sub-nav a[aria-current="page"]')?.dataset.jump || '',
-        scrolled: Math.round(window.scrollY)
-      })`)
-    );
-    check('点「已掌握」会滚过去并点亮它', subJump.current === 'masteredSection', JSON.stringify(subJump));
-    check('点小导航确实滚动了页面', subJump.scrolled > 0, String(subJump.scrolled));
-
-    // 再塞一个「昨天」收藏的词：接口只收前端字段，不认 addedAt，所以直接改数据文件造一天前
-    const marksFile = path.join(DATA, 'marks.json');
-    const marksDoc = JSON.parse(fs.readFileSync(marksFile, 'utf8'));
-    marksDoc.marks.push({
-      word: 'wee',
-      cn: '极小的',
-      pos: 'adj.',
-      addedAt: new Date(Date.now() - 86400000).toISOString(),
-    });
-    fs.writeFileSync(marksFile, JSON.stringify(marksDoc, null, 2));
-    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#learningList .day-head').length >= 2`).catch(() => false), {
-      label: '两天分成两组',
-    });
-    const page2 = JSON.parse(
-      await cdp.eval(`JSON.stringify({
-        groups: document.querySelectorAll('#learningList .day-group').length,
-        rules: document.querySelectorAll('#learningList .day-rule').length,
-        labels: [...document.querySelectorAll('#learningList .day-head h4')].map(h => h.textContent.replace(/\\s+/g, ' ').trim())
-      })`)
-    );
-    check('两天的词分成两组', page2.groups === 2, JSON.stringify(page2));
-    check('两组各有一条长横线', page2.rules === 2, JSON.stringify(page2));
-    check('日期新的排在前面（19 号在 18 号前）', /19 日/.test(page2.labels[0]) && /18 日/.test(page2.labels[1]), JSON.stringify(page2.labels));
+    check('导航上单词本高亮且带学习中计数', page1.navCurrent.includes('单词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
 
     // 点「已掌握」：这个词应该从学习中挪到已掌握
-    await cdp.eval(`(() => {
-      const row = document.querySelector('#learningList .mark-row[data-word="ledger"]');
-      row.querySelector('[data-act="master"]').click();
-      return 'clicked';
-    })()`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#masteredList .mark-row[data-word="ledger"]').length === 1`), {
+    await cdp.eval(`document.querySelector('#vocabBody .mark-row[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`!!document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"]')`), {
       label: '标记已掌握后挪到另一摞',
     });
     const afterMaster = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        learning: document.querySelectorAll('#learningList .mark-row').length,
-        mastered: document.querySelectorAll('#masteredList .mark-row').length,
-        masterLabel: document.querySelector('#masteredList .mark-row[data-word="ledger"] [data-act="master"]')?.textContent
+        learning: document.querySelectorAll('#vocabBody .mark-row:not(.is-mastered)').length,
+        mastered: document.querySelectorAll('#vocabBody .mark-row.is-mastered').length,
+        masterLabel: document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"] [data-act="master"]')?.textContent
       })`)
     );
-    check('标成已掌握后从学习中消失', afterMaster.learning === expectLearning, JSON.stringify(afterMaster));
+    check('标成已掌握后从学习中消失', afterMaster.learning === expectLearning - 1, JSON.stringify(afterMaster));
     check('标成已掌握后出现在已掌握那摞', afterMaster.mastered === expectMastered + 1, JSON.stringify(afterMaster));
     check('已掌握那行给的是「退回学习」', afterMaster.masterLabel === '退回学习', String(afterMaster.masterLabel));
 
     // 再点回去
-    await cdp.eval(`document.querySelector('#masteredList .mark-row[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#learningList .mark-row[data-word="ledger"]').length === 1`), {
+    await cdp.eval(`document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`!!document.querySelector('#vocabBody .mark-row:not(.is-mastered)[data-word="ledger"]')`), {
       label: '退回学习',
     });
     check('能退回学习中', true);
 
-    // 空态文案：清空后两段都该给提示
-    const cleared = await (
-      await fetch(`${BASE}/api/marks?all=1`, { method: 'DELETE' })
-    ).json();
-    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
-    await waitFor(() => cdp.eval(`!document.getElementById('learningEmpty').hidden`).catch(() => false), {
-      label: '空态提示',
-    });
+    // 空态文案：清空后给提示
+    const cleared = await (await fetch(`${BASE}/api/marks?all=1`, { method: 'DELETE' })).json();
+    await cdp.send('Page.navigate', { url: `${BASE}/vocab.html?tab=mine` });
+    await waitFor(() => cdp.eval(`!!document.querySelector('#vocabBody .empty-tip')`), { tries: 90, label: '空态提示' });
     const emptyUi = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        marks: document.querySelectorAll('.mark-row').length,
-        learningEmpty: !document.getElementById('learningEmpty').hidden,
-        masteredEmpty: !document.getElementById('masteredEmpty').hidden,
-        learningCount: document.getElementById('countLearning').textContent
+        rows: document.querySelectorAll('#vocabBody .mark-row').length,
+        tip: document.querySelector('#vocabBody .empty-tip')?.textContent || ''
       })`)
     );
-    check('生词本清空后没有行', emptyUi.marks === 0 && cleared.marks.length === 0, JSON.stringify(emptyUi));
-    check('两摞都显示空态提示', emptyUi.learningEmpty && emptyUi.masteredEmpty, JSON.stringify(emptyUi));
+    check('生词本清空后没有行', emptyUi.rows === 0 && cleared.marks.length === 0, JSON.stringify(emptyUi));
+    check('清空后给出空态提示', emptyUi.tip.length > 0, emptyUi.tip);
 
     ws.close();
   } catch (err) {

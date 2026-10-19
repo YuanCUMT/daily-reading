@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>单词本 · 每日阅读</title>
+<link rel="stylesheet" href="/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23d93625'/><text x='16' y='22' font-family='Helvetica,Arial' font-size='13' font-weight='bold' fill='%23fff' text-anchor='middle'>D/R</text></svg>" />
+</head>
+<body class="page vocab-page">
+<div class="app">
+
+  <header class="site-header">
+    <div class="nav-shell">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">D/R</span>
+        <span class="brand-word">
+          <h1>每日阅读</h1>
+          <p>单词本</p>
+        </span>
+      </a>
+      <nav class="page-nav" aria-label="主导航">
+        <a href="/">今天</a>
+        <a href="/#archive">历史文章</a>
+        <a href="/vocab.html" aria-current="page">单词本 <span class="nav-count" id="navCount">0</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="marks-head">
+      <p class="eyebrow">Vocabulary book / 单词本</p>
+      <h2>背过的词，<br />都在这一本。</h2>
+      <p class="marks-lede">
+        三个列表：<b>每日单词</b>是每天导入的全部词；<b>我的生词</b>是阅读时点「☆ 收藏」攒下来的，
+        背下来的点「已掌握」挪到下面；<b>短语</b>是收藏过的多词表达（比如 in terms of）。
+      </p>
+      <dl class="marks-stats">
+        <div>
+          <dd id="statTotal">0</dd>
+          <dt>累计单词</dt>
+        </div>
+        <div>
+          <dd id="statLearning">0</dd>
+          <dt>生词 · 学习中</dt>
+        </div>
+        <div>
+          <dd id="statMastered">0</dd>
+          <dt>生词 · 已掌握</dt>
+        </div>
+        <div>
+          <dd id="statPhrases">0</dd>
+          <dt>短语</dt>
+        </div>
+      </dl>
+    </section>
+
+    <section class="vocab-main">
+    <div class="vocab-bar">
+      <div class="vocab-tabs">
+        <button class="vtab active" data-vtab="daily">每日单词 <span class="count" id="vtabDailyCount">0</span></button>
+        <button class="vtab" data-vtab="mine">我的生词 <span class="count" id="vtabMineCount">0</span></button>
+        <button class="vtab" data-vtab="phrases">短语 <span class="count" id="vtabPhraseCount">0</span></button>
+      </div>
+      <div class="vocab-tools">
+        <button class="btn ghost" id="btnFillMeaning" hidden>补全释义</button>
+        <select id="vocabSort" title="排序方式">
+          <option value="time-desc">时间：新 → 旧</option>
+          <option value="time-asc">时间：旧 → 新</option>
+          <option value="alpha">字母：A → Z</option>
+          <option value="alpha-desc">字母：Z → A</option>
+        </select>
+        <input type="search" id="vocabSearch" placeholder="搜单词或释义" autocomplete="off" />
+      </div>
+    </div>
+
+    <p class="tip" id="vocabStatus" hidden></p>
+    <div id="vocabBody"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p class="footer-brand">每日阅读 <span aria-hidden="true">● ▲ ■</span></p>
+    <p>单词存在本机 <code>data/words/</code>，生词存在 <code>data/marks.json</code>，不上传任何服务器。</p>
+  </footer>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script src="/vocab.js"></script>
+</body>
+</html>
