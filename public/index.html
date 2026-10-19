@@ -12,29 +12,19 @@
 
   <header class="site-header">
     <div class="nav-shell">
-      <div class="brand">
+      <a class="brand" href="/">
         <span class="brand-mark" aria-hidden="true">D/R</span>
         <span class="brand-word">
           <h1>每日阅读</h1>
           <p id="brandSub">今天背的词，读成一篇真题</p>
         </span>
-      </div>
-      <div class="topbar-actions">
-        <label class="field-inline">
-          <span class="field-label">日期</span>
-          <input type="date" id="datePicker" />
-        </label>
-        <label class="field-inline">
-          <span class="field-label">模式</span>
-          <select id="modeQuick" class="mode-quick" title="文章模式（切完点「生成文章」生效）">
-            <option value="review">复习模式</option>
-            <option value="exam">真题模式</option>
-          </select>
-        </label>
-        <button class="btn ghost" id="btnImport">导入单词</button>
-        <button class="btn primary" id="btnGenerate">生成文章 <span aria-hidden="true">↘</span></button>
-        <button class="btn ghost" id="btnSettings" title="设置">设置</button>
-      </div>
+      </a>
+      <nav class="page-nav" aria-label="主导航">
+        <a href="#today" data-section="today">今日文章</a>
+        <a href="#archive" data-section="archive">历史文章</a>
+        <a href="/marks.html">生词本 <span class="nav-count" id="navMarkCount">0</span></a>
+      </nav>
+      <button class="btn ghost" id="btnSettings" title="设置">设置</button>
     </div>
   </header>
 
@@ -166,49 +156,87 @@
       </dl>
     </section>
 
-    <section class="workspace" id="work">
-      <aside class="sidebar">
-        <section class="panel">
-          <div class="panel-bar">
-            <span class="panel-code">01 / words</span>
-            <button class="mini-btn" id="btnClearWords" title="清空今天的单词">清空</button>
-          </div>
-          <h2>今日单词 <span class="count" id="wordCount">0</span></h2>
-          <div id="wordList" class="word-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-bar">
-            <span class="panel-code">02 / archive</span>
-          </div>
-          <h2>历史文章</h2>
-          <div id="archive" class="archive"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-bar">
-            <span class="panel-code">03 / marks</span>
-            <button class="mini-btn" id="btnClearMarks" title="清空生词本">清空</button>
-          </div>
-          <h2>我的生词 <span class="count" id="markCount">0</span></h2>
-          <p class="panel-note" id="markSummary">学习中 0 · 已掌握 0</p>
-          <div id="markList" class="mark-list"></div>
-          <a class="panel-link" href="/marks.html">去生词本复习 <span aria-hidden="true">→</span></a>
-        </section>
-      </aside>
-
-      <div class="main" id="main">
-        <div class="empty" id="empty">
-          <p class="empty-code">EMPTY / 还没有文章</p>
-          <h2>今天这篇，还没有开始。</h2>
-          <p>截图或粘贴都行——先弄到单词，再点「生成文章」。</p>
-          <div class="empty-actions">
-            <button class="btn primary" data-act="image">上传截图识别</button>
-            <button class="btn ghost" data-act="import">手动粘贴</button>
-          </div>
-          <p class="hint" id="emptyHint"></p>
+    <section class="today" id="today">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Today / 今日</p>
+          <h2>今天这一篇</h2>
         </div>
-        <article id="articleView" hidden></article>
+        <div class="today-tools">
+          <label class="field-inline">
+            <span class="field-label">日期</span>
+            <input type="date" id="datePicker" />
+          </label>
+          <button class="btn ghost" id="btnImport">导入单词</button>
+          <button class="btn primary" id="btnGenerate">生成文章 <span aria-hidden="true">↘</span></button>
+        </div>
+      </div>
+
+      <div class="workspace" id="work">
+        <aside class="sidebar">
+          <section class="panel">
+            <div class="panel-bar">
+              <span class="panel-code">01 / words</span>
+              <button class="mini-btn" id="btnClearWords" title="清空今天的单词">清空</button>
+            </div>
+            <h2>今日单词 <span class="count" id="wordCount">0</span></h2>
+            <div id="wordList" class="word-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-bar">
+              <span class="panel-code">02 / marks</span>
+              <button class="mini-btn" id="btnClearMarks" title="清空生词本">清空</button>
+            </div>
+            <h2>我的生词 <span class="count" id="markCount">0</span></h2>
+            <p class="panel-note" id="markSummary">学习中 0 · 已掌握 0</p>
+            <div id="markList" class="mark-list"></div>
+            <a class="panel-link" href="/marks.html">去生词本复习 <span aria-hidden="true">→</span></a>
+          </section>
+        </aside>
+
+        <div class="main" id="main">
+          <div class="empty" id="empty">
+            <p class="empty-code">EMPTY / 还没有文章</p>
+            <h2>今天这篇，还没有开始。</h2>
+            <p>截图或粘贴都行——先弄到单词，再点「生成文章」。</p>
+            <div class="empty-actions">
+              <button class="btn primary" data-act="image">上传截图识别</button>
+              <button class="btn ghost" data-act="import">手动粘贴</button>
+            </div>
+            <p class="hint" id="emptyHint"></p>
+          </div>
+          <article id="articleView" hidden></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="archive-section" id="archive">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Archive / 历史文章</p>
+          <h2>读过的那几篇</h2>
+        </div>
+        <p>按日期倒序。<br>点一张卡片就打开那天那篇。</p>
+      </div>
+
+      <div class="search-panel">
+        <label for="archiveSearch">搜索</label>
+        <div class="search-field">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="archiveSearch" type="search" placeholder="例如 文化挪用、2026-10-17、真题" autocomplete="off" />
+          <kbd>/</kbd>
+        </div>
+        <p id="archiveStatus">共 0 篇</p>
+      </div>
+
+      <div class="archive-grid" id="archiveGrid"></div>
+
+      <div class="empty-state" id="archiveEmpty" hidden>
+        <p class="empty-code">EMPTY / 还没有历史文章</p>
+        <h3>生成过的那几篇，会排在这里。</h3>
+        <p>每生成一篇文章，就按日期存进本机 <code>data/articles/</code>，回来点一下就能重读。</p>
+        <button class="btn primary" type="button" id="archiveEmptyBtn">去生成今天这一篇 <span aria-hidden="true">↘</span></button>
       </div>
     </section>
   </main>

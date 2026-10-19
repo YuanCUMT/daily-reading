@@ -47,6 +47,11 @@
       </dl>
     </section>
 
+    <nav class="sub-nav" aria-label="生词本分区">
+      <a href="#learningSection" data-jump="learningSection" aria-current="page">学习中 <span class="count" id="subCountLearning">0</span></a>
+      <a href="#masteredSection" data-jump="masteredSection">已掌握 <span class="count" id="subCountMastered">0</span></a>
+    </nav>
+
     <section class="marks-section" id="learningSection" aria-labelledby="learningTitle">
       <div class="section-heading">
         <h3 id="learningTitle">学习中 <span class="count" id="countLearning">0</span></h3>
@@ -56,7 +61,7 @@
       <p class="marks-empty" id="learningEmpty" hidden>还没有学习中的词。回到今天那页，阅读时点一下生词就能收藏。</p>
     </section>
 
-    <section class="marks-section" aria-labelledby="masteredTitle">
+    <section class="marks-section" id="masteredSection" aria-labelledby="masteredTitle">
       <div class="section-heading">
         <h3 id="masteredTitle">已掌握 <span class="count" id="countMastered">0</span></h3>
         <p>按掌握日期排。想再背一遍，点「退回学习」。</p>

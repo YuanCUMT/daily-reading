@@ -132,6 +132,8 @@ function render() {
   text('#statDays', new Set(state.marks.map((m) => dayKey(m.addedAt)).filter(Boolean)).size);
   text('#countLearning', learning.length);
   text('#countMastered', mastered.length);
+  text('#subCountLearning', learning.length);
+  text('#subCountMastered', mastered.length);
   text('#navCount', learning.length);
 
   $('#learningEmpty').hidden = learning.length > 0;
@@ -194,6 +196,56 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+/* ---------- 分区小导航（学习中 / 已掌握） ---------- */
+function syncSubNav() {
+  const links = document.querySelectorAll('.sub-nav [data-jump]');
+  if (!links.length) return;
+  const header = document.querySelector('.site-header');
+  const sub = document.querySelector('.sub-nav');
+  const line =
+    (header ? header.getBoundingClientRect().height : 0) +
+    (sub ? sub.getBoundingClientRect().height : 0) +
+    24;
+  let active = '';
+  document.querySelectorAll('.sub-nav [data-jump]').forEach((a) => {
+    const section = document.getElementById(a.dataset.jump);
+    if (section && section.getBoundingClientRect().top <= line) active = a.dataset.jump;
+  });
+  const doc = document.documentElement;
+  if (window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
+    const all = document.querySelectorAll('.sub-nav [data-jump]');
+    if (all.length) active = all[all.length - 1].dataset.jump;
+  }
+  // 停在页顶时两块都还没越线，默认点亮第一块
+  if (!active) active = links[0].dataset.jump;
+  links.forEach((a) => {
+    if (a.dataset.jump === active) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+}
+
+document.querySelector('.sub-nav')?.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-jump]');
+  if (!a) return;
+  e.preventDefault();
+  document.getElementById(a.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+let subTicking = false;
+window.addEventListener(
+  'scroll',
+  () => {
+    if (subTicking) return;
+    subTicking = true;
+    requestAnimationFrame(() => {
+      subTicking = false;
+      syncSubNav();
+    });
+  },
+  { passive: true }
+);
+window.addEventListener('resize', syncSubNav);
+
 /* ---------- 启动 ---------- */
 async function boot() {
   try {
@@ -205,6 +257,7 @@ async function boot() {
     state.marks = [];
   }
   render();
+  syncSubNav();
 }
 
 boot();

@@ -196,6 +196,10 @@ async function handleApi(req, res, url) {
     });
   }
 
+  if (p === '/api/articles' && req.method === 'GET') {
+    return ok(res, { articles: store.listArticleSummaries() });
+  }
+
   if (p === '/api/config' && req.method === 'POST') {
     const body = await readBody(req);
     const patch = {};

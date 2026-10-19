@@ -230,36 +230,69 @@ function seed() {
     check('弹窗默认关闭', initial.modalsHidden === true);
     check('没有 JS 报错', cdp.consoleErrors.length === 0 && cdp.pageErrors.length === 0, JSON.stringify([...cdp.consoleErrors, ...cdp.pageErrors]));
 
-    // ---------- 顶栏一键切模式 ----------
-    const quick0 = await cdp.eval(`document.getElementById('modeQuick').value`);
-    check('顶栏有一键切换模式，默认复习模式', quick0 === 'review', String(quick0));
+    // ---------- 顶栏是导航，模式挪进了设置 ----------
+    const topbar = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        navItems: [...document.querySelectorAll('.page-nav a')].map((a) => a.textContent.trim().replace(/\\s+/g, ' ')),
+        hasModeSelect: !!document.getElementById('modeQuick'),
+        settingsInHeader: !!document.querySelector('.site-header #btnSettings'),
+        headerButtons: [...document.querySelectorAll('.site-header button')].map((b) => b.id)
+      })`)
+    );
+    check('顶栏有导航：今日文章 / 历史文章 / 生词本',
+      topbar.navItems.length === 3 && topbar.navItems[0].startsWith('今日文章') &&
+        topbar.navItems[1].startsWith('历史文章') && topbar.navItems[2].startsWith('生词本'),
+      JSON.stringify(topbar.navItems));
+    check('顶栏没有模式下拉', topbar.hasModeSelect === false);
+    check('设置按钮在顶栏里', topbar.settingsInHeader === true);
+    check('顶栏只剩一个按钮（设置）', topbar.headerButtons.join(',') === 'btnSettings',
+      topbar.headerButtons.join(','));
 
+    // 设置里改模式 → 存到服务端，文章头跟着变
+    await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
+    await sleep(200);
     await cdp.eval(`(() => {
-      const s = document.getElementById('modeQuick');
+      const s = document.getElementById('cfgMode');
       s.value = 'exam';
       s.dispatchEvent(new Event('change'));
+      document.getElementById('btnSaveSettings').click();
       return 'ok';
     })()`);
     await waitFor(async () => {
       const r = await (await fetch(`${BASE}/api/state`)).json();
       return r.config.prefs.mode === 'exam';
     }, { label: '模式已存到服务端' });
-    check('切换后立刻保存到服务端', true);
+    check('在设置里改模式会存到服务端', true);
 
-    // 打开设置，下拉框应该已经同步成真题模式
+    // 等前端把新配置拉回来再继续，否则后面的断言会读到上一份配置
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'exam'`), { label: '前端已拿到新配置' });
+    const rightAfterSave = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        stateMode: (state.config || {}).prefs?.mode,
+        cfgMode: document.getElementById('cfgMode').value,
+        hidden: document.getElementById('modalSettings').hidden,
+        limitHidden: document.getElementById('examLimitRow').hidden
+      })`)
+    );
+    check('保存后前端状态已是真题模式', rightAfterSave.stateMode === 'exam', JSON.stringify(rightAfterSave));
+    check('保存后下拉仍是真题模式', rightAfterSave.cfgMode === 'exam', JSON.stringify(rightAfterSave));
+
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
     await sleep(200);
-    const synced = JSON.parse(
+    const modeState = JSON.parse(
       await cdp.eval(`JSON.stringify({
+        dbgStateMode: (typeof state !== 'undefined' ? (state.config || {}).prefs?.mode : 'no-state'),
+        dbgHidden: document.getElementById('modalSettings').hidden,
+        dbgStatus: document.getElementById('settingsStatus').textContent,
         modal: document.getElementById('cfgMode').value,
         limitRowHidden: document.getElementById('examLimitRow').hidden
       })`)
     );
-    check('设置里的模式跟着同步', synced.modal === 'exam', JSON.stringify(synced));
-    check('同步后「每篇用词数」可见', synced.limitRowHidden === false);
+    check('设置里的模式下拉是当前值', modeState.modal === 'exam', JSON.stringify(modeState));
+    check('真题模式下「每篇用词数」可见', modeState.limitRowHidden === false);
     await cdp.eval(`document.querySelector('#modalSettings [data-close]').click(); 'ok'`);
 
-    // 再从设置里切回复习模式，顶栏也要跟着变
+    // 改回复习模式，后面的用例按复习模式的预期走
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
     await sleep(150);
     await cdp.eval(`(() => {
@@ -269,8 +302,11 @@ function seed() {
       document.getElementById('btnSaveSettings').click();
       return 'ok';
     })()`);
-    await waitFor(() => cdp.eval(`document.getElementById('modeQuick').value === 'review'`), { label: '顶栏同步回复习模式' });
-    check('从设置里改模式，顶栏也跟着变', true);
+    await waitFor(async () => {
+      const r = await (await fetch(`${BASE}/api/state`)).json();
+      return r.config.prefs.mode === 'review';
+    }, { label: '改回复习模式' });
+    check('从设置里改回复习模式', true);
     await cdp.eval(`document.querySelector('#modalSettings [data-close]').click(); 'ok'`);
 
     // ---------- 截图识别 ----------
@@ -702,6 +738,100 @@ function seed() {
     await sleep(200);
     check('切换「显示中文」后译文可见', (await cdp.eval(`document.querySelectorAll('#articleView .zh:not([hidden])').length`)) === 5);
 
+    // ---------- 历史文章：卡片栅格 / 搜索 / 打开 ----------
+    const archive = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        cards: document.querySelectorAll('#archiveGrid .archive-card').length,
+        status: document.getElementById('archiveStatus').textContent.trim(),
+        emptyHidden: document.getElementById('archiveEmpty').hidden,
+        hasSpine: document.querySelectorAll('#archiveGrid .archive-card .card-spine').length,
+        accents: [...document.querySelectorAll('#archiveGrid .archive-card')].map((c) => c.dataset.accent),
+        titles: [...document.querySelectorAll('#archiveGrid .card-title')].map((h) => h.textContent.trim()),
+        firstDate: document.querySelector('#archiveGrid .archive-card')?.dataset.date
+      })`)
+    );
+    check('历史文章是卡片栅格', archive.cards >= 1 && archive.hasSpine === archive.cards, JSON.stringify(archive));
+    // 卡片可能只有一两张，逐张校验轮换关系（第 i 张 = i % 3）
+    const accentsOk = archive.accents.every((v, i) => v === String(i % 3));
+    check('卡片按三色轮换强调色', accentsOk, archive.accents.join(','));
+    check('第一张卡片是最新那篇', archive.firstDate === new Date().toISOString().slice(0, 10), String(archive.firstDate));
+    check('有文章时不显示空态', archive.emptyHidden === true);
+    check('状态行写了篇数', /共 \d+ 篇/.test(archive.status), archive.status);
+
+    // 搜索：搜不存在的词应该给出「没找到」，搜标题里的词应该筛出一张
+    const needle = archive.titles[0].split(' ')[0] || 'the';
+    await cdp.eval(`(() => {
+      const i = document.getElementById('archiveSearch');
+      i.value = ${JSON.stringify(needle.slice(0, 4))};
+      i.dispatchEvent(new Event('input'));
+      return 'ok';
+    })()`);
+    await sleep(200);
+    const searched = await cdp.eval(`document.querySelectorAll('#archiveGrid .archive-card').length`);
+    check('搜索能筛出对应的卡片', searched >= 1 && searched <= archive.cards, `${needle} → ${searched}`);
+
+    await cdp.eval(`(() => {
+      const i = document.getElementById('archiveSearch');
+      i.value = 'zzzz没有这篇';
+      i.dispatchEvent(new Event('input'));
+      return 'ok';
+    })()`);
+    await sleep(200);
+    const noHit = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        cards: document.querySelectorAll('#archiveGrid .archive-card').length,
+        note: !!document.querySelector('#archiveGrid .archive-noresult')
+      })`)
+    );
+    check('搜不到时给出提示而不是空白', noHit.cards === 0 && noHit.note === true, JSON.stringify(noHit));
+
+    await cdp.eval(`(() => {
+      const i = document.getElementById('archiveSearch');
+      i.value = '';
+      i.dispatchEvent(new Event('input'));
+      return 'ok';
+    })()`);
+    await sleep(150);
+
+    // 点最后一张卡片：应该换成那天的文章，并滚回「今日文章」
+    const targetDate = await cdp.eval(
+      `(() => { const all = document.querySelectorAll('#archiveGrid .archive-card'); return all[all.length - 1].dataset.date; })()`
+    );
+    await cdp.eval(
+      `document.querySelectorAll('#archiveGrid .archive-card')[document.querySelectorAll('#archiveGrid .archive-card').length - 1].click(); 'ok'`
+    );
+    await waitFor(
+      () => cdp.eval(`document.getElementById('datePicker').value === ${JSON.stringify(targetDate)}`),
+      { label: '打开历史文章' }
+    );
+    const opened = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        date: document.getElementById('datePicker').value,
+        title: document.querySelector('.article-head h2')?.textContent.trim() || '',
+        scrolled: window.scrollY
+      })`)
+    );
+    check('点卡片会切换到那一天的文章', opened.date === targetDate, JSON.stringify(opened));
+    check('切换后正文有标题', opened.title.length > 0, opened.title);
+
+    // 导航：滚到历史文章区，横线跟过去
+    await cdp.eval(`document.getElementById('archive').scrollIntoView({ block: 'start', behavior: 'instant' }); 'ok'`);
+    await sleep(400);
+    const navState = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        active: document.querySelector('.page-nav a[aria-current="page"]')?.dataset.section || '',
+        scrollY: Math.round(window.scrollY)
+      })`)
+    );
+    check('滚到历史文章时导航点亮「历史文章」', navState.active === 'archive', JSON.stringify(navState));
+
+    await cdp.eval(`window.scrollTo({ top: 0, behavior: 'instant' }); 'ok'`);
+    await sleep(300);
+    const navTop = await cdp.eval(
+      `document.querySelector('.page-nav a[aria-current="page"]')?.dataset.section || ''`
+    );
+    check('回到首屏时导航点亮「今日文章」', navTop === 'today', String(navTop));
+
     // ---------- 设置 ----------
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
     await sleep(200);
@@ -834,7 +964,17 @@ function seed() {
         rowPx: Math.round(document.querySelector('#learningList .mark-row')?.getBoundingClientRect().width || 0),
         navCount: document.getElementById('navCount').textContent,
         navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || '',
-        hasSummaryLink: !!document.querySelector('#markSummary')
+        hasSummaryLink: !!document.querySelector('#markSummary'),
+        subItems: [...document.querySelectorAll('.sub-nav a')].map((a) => a.textContent.trim().split(' ')[0]),
+        subCounts: [
+          document.getElementById('subCountLearning')?.textContent,
+          document.getElementById('subCountMastered')?.textContent
+        ],
+        subCurrent: document.querySelector('.sub-nav a[aria-current="page"]')?.dataset.jump || '',
+        subSticky: (() => {
+          const n = document.querySelector('.sub-nav');
+          return n ? getComputedStyle(n).position : '';
+        })()
       })`)
     );
 
@@ -846,6 +986,27 @@ function seed() {
     check('横线是真的画出来的粗长线', page1.ruleWidth === '2px solid' && page1.rulePx >= page1.rowPx - 2, JSON.stringify(page1));
     check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
     check('导航上生词本高亮且带计数', page1.navCurrent.includes('生词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
+
+    // 生词本页内的分区小导航：学习中 / 已掌握，粘在顶栏下面
+    check('生词本有「学习中 / 已掌握」小导航',
+      page1.subItems[0] === '学习中' && page1.subItems[1] === '已掌握', JSON.stringify(page1.subItems));
+    check('小导航显示两摞的数量',
+      page1.subCounts[0] === String(expectLearning) && page1.subCounts[1] === String(expectMastered),
+      JSON.stringify(page1.subCounts));
+    check('小导航吸顶', page1.subSticky === 'sticky', page1.subSticky);
+    check('默认点亮「学习中」', page1.subCurrent === 'learningSection', page1.subCurrent);
+
+    // 点小导航跳到「已掌握」，横线也要跟过去
+    await cdp.eval(`document.querySelector('.sub-nav a[data-jump="masteredSection"]').click(); 'ok'`);
+    await sleep(900);
+    const subJump = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        current: document.querySelector('.sub-nav a[aria-current="page"]')?.dataset.jump || '',
+        scrolled: Math.round(window.scrollY)
+      })`)
+    );
+    check('点「已掌握」会滚过去并点亮它', subJump.current === 'masteredSection', JSON.stringify(subJump));
+    check('点小导航确实滚动了页面', subJump.scrolled > 0, String(subJump.scrolled));
 
     // 再塞一个「昨天」收藏的词：接口只收前端字段，不认 addedAt，所以直接改数据文件造一天前
     const marksFile = path.join(DATA, 'marks.json');
