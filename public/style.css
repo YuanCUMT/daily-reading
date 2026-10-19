@@ -287,7 +287,10 @@ input[type="date"]:focus-visible, .mode-quick:focus-visible {
 /* ---------------------------------------------------------------- 生词本 */
 .mark-list {
   display: flex; flex-direction: column;
-  max-height: 42vh; overflow-y: auto; overflow-x: hidden;
+  /* 侧栏现在只有这一栏，让它尽量占满视口高度；内容再长就自己滚 */
+  max-height: calc(100vh - var(--header-h) - 190px);
+  min-height: 240px;
+  overflow-y: auto; overflow-x: hidden;
   padding: 0 8px 8px;
 }
 .mark-chip {

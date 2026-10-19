@@ -233,6 +233,13 @@ function renderMine(items) {
   const mastered = items.filter((it) => it.mastered);
   if (!items.length) return '';
 
+  // 按字母排时不按天分组，整段平铺；按时间排才分组
+  const grouped = state.sort.startsWith('time-');
+  const rows = (list, isMastered) =>
+    grouped
+      ? groupsHTML(groupByDay(list, (m) => (isMastered ? m.masteredAt || m.time : m.time)), isMastered)
+      : `<ul class="mark-rows">${list.map((m) => rowHTML(m, isMastered)).join('')}</ul>`;
+
   const parts = [];
   if (learning.length) {
     parts.push(`<section class="marks-section">
@@ -240,7 +247,7 @@ function renderMine(items) {
         <h3>学习中 <span class="count">${learning.length}</span></h3>
         <p>还没背下来的词。背下来就点这一行的「已掌握」。</p>
       </div>
-      <div class="mark-groups">${groupsHTML(groupByDay(learning, (m) => m.time), false)}</div>
+      <div class="mark-groups">${rows(learning, false)}</div>
     </section>`);
   }
   if (mastered.length) {
@@ -249,7 +256,7 @@ function renderMine(items) {
         <h3>已掌握 <span class="count">${mastered.length}</span></h3>
         <p>按掌握日期排。想再背一遍，点「退回学习」。</p>
       </div>
-      <div class="mark-groups">${groupsHTML(groupByDay(mastered, (m) => m.masteredAt || m.time), true)}</div>
+      <div class="mark-groups">${rows(mastered, true)}</div>
     </section>`);
   }
   const q = state.query.trim();

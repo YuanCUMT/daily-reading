@@ -612,6 +612,8 @@ function seed() {
           chips: document.querySelectorAll('#markList .mark-chip').length,
           total: state.marks.length,
           count: document.getElementById('markCount').textContent,
+          listH: box.clientHeight,
+          viewH: window.innerHeight,
           scrollable: box.scrollHeight > box.clientHeight + 2 && box.scrollTop > 0
         };
       })())`)
@@ -619,6 +621,7 @@ function seed() {
     check('侧栏把生词全部列出来，不再截前三个', sidebarLimit.chips === sidebarLimit.total, JSON.stringify(sidebarLimit));
     check('面板标题上的计数与列表一致', sidebarLimit.count === String(sidebarLimit.total), JSON.stringify(sidebarLimit));
     check('生词变多后侧栏能滚到底', sidebarLimit.scrollable === true, JSON.stringify(sidebarLimit));
+    check('生词面板占满视口高度的一半以上', sidebarLimit.listH >= sidebarLimit.viewH * 0.5, `${sidebarLimit.listH} / ${sidebarLimit.viewH}`);
     await cdp.eval(`state.marks = window.__realMarks; renderMarks(); 'ok'`);
 
     // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
@@ -1195,6 +1198,26 @@ function seed() {
     check('每组都有一条分割横线', page1.dayRules === page1.dayHeads, JSON.stringify(page1));
     check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
     check('导航上单词本高亮且带学习中计数', page1.navCurrent.includes('单词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
+
+    // 排序对「我的生词」也要生效：按字母排时不按天分组，整段按字母平铺
+    await cdp.eval(`(() => { const s = document.getElementById('vocabSort'); s.value = 'alpha'; s.dispatchEvent(new Event('change')); return 'ok'; })()`);
+    await sleep(250);
+    const mineAlpha = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        dayHeads: document.querySelectorAll('#vocabBody .day-head').length,
+        sections: [...document.querySelectorAll('#vocabBody .marks-section')].map((sec) =>
+          [...sec.querySelectorAll('.mark-row .w')].map((e) => e.textContent)
+        )
+      })`)
+    );
+    const perSectionSorted = mineAlpha.sections.every(
+      (words) => JSON.stringify(words) === JSON.stringify(words.slice().sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })))
+    );
+    check('生词按字母排时不按天分组', mineAlpha.dayHeads === 0, JSON.stringify(mineAlpha.dayHeads));
+    check('生词按字母排时每一段都是字母序', mineAlpha.sections.length > 0 && perSectionSorted, JSON.stringify(mineAlpha.sections));
+    // 排回时间，后面的断言和截图都按默认来
+    await cdp.eval(`(() => { const s = document.getElementById('vocabSort'); s.value = 'time-desc'; s.dispatchEvent(new Event('change')); return 'ok'; })()`);
+    await sleep(250);
 
     // 点「已掌握」：这个词应该从学习中挪到已掌握
     await cdp.eval(`document.querySelector('#vocabBody .mark-row[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
