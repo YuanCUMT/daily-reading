@@ -329,6 +329,28 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     // 恢复成 5 个词，供后面的文章测试用
     await json('/api/words', { method: 'POST', body: { date: '2026-10-16', text } });
 
+    // ---- 5b. 单词本（按天汇总）----
+    await json('/api/words', { method: 'POST', body: { date: '2026-10-15', words: [{ word: 'zebra' }, { word: 'apple' }] } });
+    const vocab = await json('/api/vocab');
+    const vDays = vocab.data.days || [];
+    check('单词本按天返回', vDays.length === 2 && vDays[0].date === '2026-10-16', JSON.stringify(vDays.map((d) => d.date)));
+    check('单词本合计正确', vocab.data.total === 7, String(vocab.data.total));
+    const d15 = vDays.find((d) => d.date === '2026-10-15');
+    check('单词本能看到历史那天的词', !!d15 && d15.words.length === 2 && d15.words[0].word === 'zebra', JSON.stringify(d15));
+    check('单词本天数按新到旧排', vDays[0].date > vDays[1].date);
+
+    // 没有释义的词，用查词缓存补上
+    fs.mkdirSync(path.join(DATA, 'dict'), { recursive: true });
+    fs.writeFileSync(
+      path.join(DATA, 'dict', 'apple.json'),
+      JSON.stringify({ word: 'apple', cn: '苹果；苹果树', phonetic: '/ˈæpl/', pos: 'n.' })
+    );
+    const vocab2 = await json('/api/vocab');
+    const apple = (vocab2.data.days.find((d) => d.date === '2026-10-15') || { words: [] }).words.find((w) => w.word === 'apple');
+    check('单词本会拿查词缓存补释义', !!apple && apple.meaning.includes('苹果') && apple.pos === 'n.', JSON.stringify(apple));
+    fs.rmSync(path.join(DATA, 'dict', 'apple.json'), { force: true }); // 别干扰后面数缓存条数的断言
+    await json('/api/words?date=2026-10-15', { method: 'DELETE' });
+
     // ---- 6. 配置 ----
     const cfg = await json('/api/config', {
       method: 'POST',
@@ -368,6 +390,15 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     check('题目带原文定位', art.questions[0].evidence.length > 0);
     check('每题有解析', art.questions[0].explain.length > 0);
     check('没有遗漏目标词', art.missingWords.length === 0, JSON.stringify(art.missingWords));
+
+    // 单词本的第二级释义：拿当天文章 glossary 补（不额外花钱）
+    const vocabGen = await json('/api/vocab');
+    const day16 = vocabGen.data.days.find((d) => d.date === '2026-10-16');
+    check(
+      '单词本用文章词汇表补释义',
+      !!day16 && day16.words.filter((w) => w.meaning).length === 5,
+      JSON.stringify((day16?.words || []).map((w) => `${w.word}:${w.meaning || '-'}`))
+    );
     check('记录了模型', art.model === 'mock-model');
     check('文章已落盘', fs.existsSync(path.join(DATA, 'articles', '2026-10-16.json')));
     check('记录了模式', art.mode === 'review' && art.totalWords === 5, `${art.mode}/${art.totalWords}`);

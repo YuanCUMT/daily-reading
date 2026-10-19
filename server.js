@@ -420,6 +420,49 @@ async function handleApi(req, res, url) {
     return ok(res, { dictCount: store.clearDict() });
   }
 
+  // ---- 单词本（历史上所有天加的词，按天分组）----
+  // 词表里的 meaning 常常是空的（截图 OCR 只认得词）。释义按三级补：
+  //   1) 词表自己带的
+  //   2) 那天生成的文章里的 glossary（不用额外花钱）
+  //   3) 查词缓存 data/dict/<word>.json
+  if (p === '/api/vocab' && req.method === 'GET') {
+    const days = store.listWordDays().map((d) => {
+      const article = store.loadArticle(d.date);
+      const gloss = new Map();
+      for (const g of article?.glossary || []) {
+        if (g?.word && g?.cn) gloss.set(String(g.word).toLowerCase(), g);
+      }
+      return {
+        date: d.date,
+        words: d.words.map((w) => {
+          const item = {
+            word: w.word,
+            meaning: w.meaning || '',
+            phonetic: w.phonetic || '',
+            pos: w.pos || '',
+          };
+          const g = gloss.get(String(w.word).toLowerCase());
+          if (!item.meaning && g) {
+            item.meaning = g.cn || '';
+            item.phonetic = item.phonetic || g.phonetic || '';
+            item.pos = item.pos || g.pos || '';
+          }
+          if (!item.meaning) {
+            const hit = store.loadDictEntry(w.word);
+            if (hit) {
+              item.meaning = hit.cn || '';
+              item.phonetic = item.phonetic || hit.phonetic || '';
+              item.pos = item.pos || hit.pos || '';
+            }
+          }
+          return item;
+        }),
+      };
+    });
+    const total = days.reduce((n, d) => n + d.words.length, 0);
+    return ok(res, { days, total, marks: store.loadMarks().marks.length });
+  }
+
   // ---- 生词本 ----
   if (p === '/api/marks' && req.method === 'GET') {
     return ok(res, { marks: store.loadMarks().marks });

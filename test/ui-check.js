@@ -638,6 +638,86 @@ function seed() {
     );
     check('短语也能从侧栏移除', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
 
+    // ---- 单词本 ----
+    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '打开单词本' });
+    const vocab1 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        tabs: document.querySelectorAll('#modalVocab [data-vtab]').length,
+        dailyActive: document.querySelector('#modalVocab [data-vtab="daily"]').classList.contains('active'),
+        dailyCount: document.getElementById('vtabDailyCount').textContent,
+        mineCount: document.getElementById('vtabMineCount').textContent,
+        cards: document.querySelectorAll('#vocabBody .vcard').length,
+        groups: document.querySelectorAll('#vocabBody .vgroup').length
+      })`)
+    );
+    check('单词本有两个标签页', vocab1.tabs === 2 && vocab1.dailyActive === true, JSON.stringify(vocab1));
+    check('单词本每日单词数正确', vocab1.dailyCount === '5', vocab1.dailyCount);
+    check('单词本生词数正确', vocab1.mineCount === '1', vocab1.mineCount);
+    check('单词本按天分组显示', vocab1.cards === 5 && vocab1.groups === 1, JSON.stringify(vocab1));
+
+    const defWords = JSON.parse(
+      await cdp.eval(`JSON.stringify([...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent))`)
+    );
+    const defSorted = defWords.slice().sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    check('时间排序时同一天内按字母排', JSON.stringify(defWords) === JSON.stringify(defSorted), defWords.join(','));
+
+    const setSort = (v) =>
+      cdp.eval(`(() => { const s = document.getElementById('vocabSort'); s.value = '${v}'; s.dispatchEvent(new Event('change')); return 'ok'; })()`);
+    await setSort('alpha');
+    const alpha = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        words: [...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent),
+        groups: document.querySelectorAll('#vocabBody .vgroup').length
+      })`)
+    );
+    const expected = alpha.words.slice().sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    check('按字母排序生效', JSON.stringify(alpha.words) === JSON.stringify(expected), alpha.words.join(','));
+    check('字母排序时不显示日期分组', alpha.groups === 0, String(alpha.groups));
+
+    await setSort('alpha-desc');
+    const desc = JSON.parse(await cdp.eval(`JSON.stringify([...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent))`));
+    check('字母倒序也能排', JSON.stringify(desc) === JSON.stringify(expected.slice().reverse()), desc.join(','));
+
+    await setSort('time-asc');
+    check('按时间旧→新也能排', (await cdp.eval(`document.querySelectorAll('#vocabBody .vgroup').length`)) === 1);
+
+    await cdp.eval(`(() => { const i = document.getElementById('vocabSearch'); i.value = 'aband'; i.dispatchEvent(new Event('input')); return 'ok'; })()`);
+    const found = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        n: document.querySelectorAll('#vocabBody .vcard').length,
+        w: document.querySelector('#vocabBody .vcard .w')?.textContent || ''
+      })`)
+    );
+    check('搜索能过滤单词', found.n === 1 && found.w === 'abandon', JSON.stringify(found));
+
+    await cdp.eval(`(() => { const i = document.getElementById('vocabSearch'); i.value = 'zzzz'; i.dispatchEvent(new Event('input')); return 'ok'; })()`);
+    check('搜不到时给提示', (await cdp.eval(`document.querySelector('#vocabBody .empty-tip')?.textContent || ''`)).includes('没有匹配'));
+
+    await cdp.eval(`document.querySelector('#modalVocab [data-vtab="mine"]').click(); 'ok'`);
+    const mineTab = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        active: document.querySelector('#modalVocab [data-vtab="mine"]').classList.contains('active'),
+        cards: document.querySelectorAll('#vocabBody .vcard').length,
+        word: document.querySelector('#vocabBody .vcard .w')?.textContent || '',
+        hasRemove: !!document.querySelector('#vocabBody [data-vrm]')
+      })`)
+    );
+    check('切到「我的生词」标签', mineTab.active === true && mineTab.cards === 1, JSON.stringify(mineTab));
+    check('生词卡片带移出按钮', mineTab.hasRemove === true && mineTab.word === 'abandon', JSON.stringify(mineTab));
+
+    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
+    check('单词本能关掉', (await cdp.eval(`document.getElementById('modalVocab').hidden`)) === true);
+
+    // 回归：单词本的标签页以前复用了 .tab 类名，会被导入弹窗那个全局处理器带歪
+    await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
+    await cdp.eval(`document.querySelector('#modalImport .tab[data-tab="paste"]').click(); 'ok'`);
+    check(
+      '导入弹窗的分页没被单词本影响',
+      (await cdp.eval(`document.querySelector('#modalImport [data-panel="paste"]').hidden`)) === false
+    );
+    await cdp.eval(`document.querySelector('#modalImport [data-close]').click(); 'ok'`);
+
     // 选不合法的时候要说话，不能默默什么也不发生（这是用户报的「没反应」）
     await cdp.eval(`(() => {
       const p0 = document.querySelector('.para[data-para="0"] .en');

@@ -23,6 +23,7 @@
         <option value="review">复习模式</option>
         <option value="exam">真题模式</option>
       </select>
+      <button class="btn ghost" id="btnVocab" title="看所有天的单词和生词">单词本</button>
       <button class="btn ghost" id="btnImport">导入单词</button>
       <button class="btn primary" id="btnGenerate">生成文章</button>
       <button class="btn icon" id="btnSettings" title="设置">⚙️</button>
@@ -33,6 +34,7 @@
     <aside class="sidebar">
       <section class="panel">
         <h2>今日单词 <span class="count" id="wordCount">0</span>
+          <button class="mini-btn" id="btnAllWords" title="打开完整单词本">全部</button>
           <button class="mini-btn" id="btnClearWords" title="清空今天的单词">清空</button>
         </h2>
         <div id="wordList" class="word-list"></div>
@@ -43,6 +45,7 @@
       </section>
       <section class="panel">
         <h2>我的生词 <span class="count" id="markCount">0</span>
+          <button class="mini-btn" id="btnAllMarks" title="打开完整单词本">全部</button>
           <button class="mini-btn" id="btnClearMarks" title="清空生词本">清空</button>
         </h2>
         <div id="markList" class="mark-list"></div>
@@ -166,6 +169,35 @@ reluctant</pre>
       <button class="btn ghost" data-close>关闭</button>
       <button class="btn primary" id="btnSaveSettings">保存</button>
     </footer>
+  </div>
+</div>
+
+<!-- ============ 单词本 ============ -->
+<div class="modal" id="modalVocab" hidden>
+  <div class="modal-card wide">
+    <header>
+      <h3>单词本</h3>
+      <button class="btn icon" data-close>✕</button>
+    </header>
+    <div class="modal-body vocab-body">
+      <div class="vocab-bar">
+        <div class="tabs vocab-tabs">
+          <button class="vtab active" data-vtab="daily">每日单词 <span class="count" id="vtabDailyCount">0</span></button>
+          <button class="vtab" data-vtab="mine">我的生词 <span class="count" id="vtabMineCount">0</span></button>
+        </div>
+        <div class="vocab-tools">
+          <select id="vocabSort" title="排序方式">
+            <option value="time-desc">时间：新 → 旧</option>
+            <option value="time-asc">时间：旧 → 新</option>
+            <option value="alpha">字母：A → Z</option>
+            <option value="alpha-desc">字母：Z → A</option>
+          </select>
+          <input type="search" id="vocabSearch" placeholder="搜单词或释义" />
+        </div>
+      </div>
+      <div id="vocabBody" class="vocab-grid"></div>
+      <p class="tip" id="vocabEmpty" hidden></p>
+    </div>
   </div>
 </div>
 

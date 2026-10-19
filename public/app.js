@@ -16,6 +16,10 @@ const state = {
   dictCache: new Map(), // 本次会话已经查过的词，省一次请求
   images: [], // 待识别的截图 [{name, dataUrl}]
   candidates: [], // 识别出来的候选词
+  vocab: null, // 单词本：{ days: [{ date, words }], total }
+  vocabTab: 'daily', // daily | mine
+  vocabSort: 'time-desc', // time-desc | time-asc | alpha | alpha-desc
+  vocabQuery: '',
 };
 
 // ------------------------------------------------------------------ 网络
@@ -181,6 +185,132 @@ function renderMarks() {
       </div>`;
     })
     .join('');
+}
+
+// ------------------------------------------------------------------ 单词本
+// 侧栏那两个小框只放「今天的词」和「生词」，词一多就挤成一团。
+// 单词本是完整版：按天汇总所有导入过的词，支持时间 / 字母两种排序，还能搜。
+async function openVocab(tab = 'daily') {
+  state.vocabTab = tab === 'mine' ? 'mine' : 'daily';
+  state.vocabQuery = '';
+  const search = $('#vocabSearch');
+  if (search) search.value = '';
+  try {
+    state.vocab = await api('/api/vocab');
+  } catch (e) {
+    state.vocab = { days: [], total: 0 };
+    toast(e.message || '读取单词本失败', true);
+  }
+  renderVocab();
+  openModal($('#modalVocab'));
+}
+
+function vocabItems() {
+  if (state.vocabTab === 'mine') {
+    return state.marks.map((m) => ({
+      word: m.word,
+      phonetic: m.phonetic || '',
+      pos: m.pos || '',
+      meaning: m.cn || '',
+      collocation: m.collocation || '',
+      examSense: m.examSense || '',
+      note: m.note || '',
+      time: m.addedAt || m.articleDate || '',
+      date: String(m.addedAt || '').slice(0, 10) || m.articleDate || '',
+      removable: true,
+    }));
+  }
+  const out = [];
+  for (const day of state.vocab?.days || []) {
+    for (const w of day.words || []) {
+      out.push({
+        word: w.word,
+        phonetic: w.phonetic || '',
+        pos: w.pos || '',
+        meaning: w.meaning || '',
+        time: day.date,
+        date: day.date,
+        removable: false,
+      });
+    }
+  }
+  return out;
+}
+
+const byAlpha = (a, b) => a.word.localeCompare(b.word, 'en', { sensitivity: 'base' });
+
+function sortedVocabItems() {
+  const all = vocabItems();
+  const q = state.vocabQuery.trim().toLowerCase();
+  const list = q
+    ? all.filter((it) => it.word.toLowerCase().includes(q) || it.meaning.toLowerCase().includes(q))
+    : all;
+  const byTimeAsc = (a, b) => String(a.time).localeCompare(String(b.time)) || byAlpha(a, b);
+  const byTimeDesc = (a, b) => String(b.time).localeCompare(String(a.time)) || byAlpha(a, b);
+  if (state.vocabSort === 'alpha') return list.slice().sort(byAlpha);
+  if (state.vocabSort === 'alpha-desc') return list.slice().sort((a, b) => byAlpha(b, a));
+  if (state.vocabSort === 'time-asc') return list.slice().sort(byTimeAsc);
+  return list.slice().sort(byTimeDesc);
+}
+
+function vocabCard(it, showDate) {
+  const subs = [
+    it.collocation ? `<div class="sub"><i>搭配</i>${esc(it.collocation)}</div>` : '',
+    it.examSense ? `<div class="sub"><i>考研常考</i>${esc(it.examSense)}</div>` : '',
+    it.note ? `<div class="sub"><i>注释</i>${esc(it.note)}</div>` : '',
+  ].join('');
+  return `<div class="vcard" data-word="${esc(it.word)}">
+    <div class="top">
+      <span class="w">${esc(it.word)}</span>
+      ${it.phonetic ? `<span class="ph">${esc(it.phonetic)}</span>` : ''}
+      ${it.pos ? `<span class="pos">${esc(it.pos)}</span>` : ''}
+    </div>
+    ${it.meaning ? `<div class="m">${esc(it.meaning)}</div>` : ''}
+    ${subs}
+    ${showDate && it.date ? `<div class="foot">${it.removable ? '收于 ' : ''}${esc(it.date)}</div>` : ''}
+    ${it.removable ? `<span class="rm" data-vrm="${esc(it.word)}" title="移出生词本">✕</span>` : ''}
+  </div>`;
+}
+
+function renderVocab() {
+  const daily = state.vocabTab !== 'mine';
+  $('#vtabDailyCount').textContent = state.vocab?.total ?? 0;
+  $('#vtabMineCount').textContent = state.marks.length;
+  document.querySelectorAll('#modalVocab [data-vtab]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.vtab === (daily ? 'daily' : 'mine'));
+  });
+  const sel = $('#vocabSort');
+  if (sel) sel.value = state.vocabSort;
+
+  const items = sortedVocabItems();
+  const box = $('#vocabBody');
+  if (!items.length) {
+    const q = state.vocabQuery.trim();
+    box.innerHTML = `<p class="tip empty-tip">${
+      q
+        ? `没有匹配「${esc(q)}」的词。`
+        : daily
+          ? '还没有导入过单词。点右上角「导入单词」开始。'
+          : '生词本还是空的。阅读时点任意单词，再点「☆ 收藏」就能收进来。'
+    }</p>`;
+    return;
+  }
+
+  // 按时间排时顺手按天分组：一眼看出哪天加了哪些词
+  const grouped = daily && state.vocabSort.startsWith('time-');
+  const perDay = new Map();
+  if (grouped) for (const it of items) perDay.set(it.date, (perDay.get(it.date) || 0) + 1);
+
+  let html = '';
+  let lastDate = null;
+  for (const it of items) {
+    if (grouped && it.date !== lastDate) {
+      lastDate = it.date;
+      html += `<div class="vgroup"><b>${esc(it.date)}</b><span>${perDay.get(it.date)} 个</span></div>`;
+    }
+    html += vocabCard(it, !grouped);
+  }
+  box.innerHTML = html;
 }
 
 function renderArticle() {
@@ -1112,6 +1242,42 @@ function syncModeUI() {
 function bindTop() {
   $('#datePicker').addEventListener('change', (e) => load(e.target.value));
   $('#btnImport').onclick = () => openModal($('#modalImport'));
+
+  // ---- 单词本 ----
+  $('#btnVocab').onclick = () => openVocab('daily');
+  $('#btnAllWords').onclick = () => openVocab('daily');
+  $('#btnAllMarks').onclick = () => openVocab('mine');
+  $('#modalVocab').addEventListener('click', async (e) => {
+    const tab = e.target.closest('[data-vtab]');
+    if (tab) {
+      state.vocabTab = tab.dataset.vtab === 'mine' ? 'mine' : 'daily';
+      state.vocabQuery = '';
+      const search = $('#vocabSearch');
+      if (search) search.value = '';
+      renderVocab();
+      return;
+    }
+    const rm = e.target.closest('[data-vrm]');
+    if (rm) {
+      e.stopPropagation();
+      try {
+        await unmarkWord(rm.dataset.vrm);
+        renderVocab();
+        toast(`已移出生词本：${rm.dataset.vrm}`);
+      } catch (err) {
+        toast(err.message || '移出失败', true);
+      }
+    }
+  });
+  $('#vocabSort').addEventListener('change', (e) => {
+    state.vocabSort = e.target.value;
+    renderVocab();
+  });
+  $('#vocabSearch').addEventListener('input', (e) => {
+    state.vocabQuery = e.target.value;
+    renderVocab();
+  });
+
   $('#empty')?.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
