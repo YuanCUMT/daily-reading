@@ -70,7 +70,6 @@ async function load(date) {
   state.words = data.words;
   state.article = data.article;
   setMarks(data.marks || []);
-  $('#datePicker').value = state.date;
   await loadArchive();
   renderAll();
   migrateOldStars();
@@ -126,6 +125,9 @@ function renderAll() {
   renderMarks();
   renderArticle();
   $('#btnGenerate').disabled = !(state.words?.words?.length);
+  const dateLabel = $('#currentDate');
+  if (dateLabel) dateLabel.textContent = state.date === state.today ? '今天' : state.date.replace(/-/g, '/');
+  syncModeSwitch();
   syncLedger();
   syncNav();
 }
@@ -1238,9 +1240,41 @@ function syncModeUI() {
     : '复习模式：把今天背的词尽量全用上，句子偏短、能靠语境猜词，重点是把词记住。';
 }
 
+/** 真题 / 复习 开关：点一下立刻切，顺手存进配置 */
+function syncModeSwitch() {
+  const mode = state.config?.prefs?.mode === 'exam' ? 'exam' : 'review';
+  $$('.mode-switch [data-mode]').forEach((btn) => {
+    const on = btn.dataset.mode === mode;
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+async function setMode(mode) {
+  if (!['exam', 'review'].includes(mode)) return;
+  if (state.config?.prefs?.mode === mode) return;
+  state.config = { ...(state.config || {}), prefs: { ...(state.config?.prefs || {}), mode } };
+  syncModeSwitch();
+  // 设置弹窗里的下拉、提示、真题用词数那行也跟着走
+  const cfgMode = $('#cfgMode');
+  if (cfgMode) {
+    cfgMode.value = mode;
+    syncModeUI();
+  }
+  try {
+    await api('/api/config', { method: 'POST', body: { prefs: { mode } } });
+    await load(state.date);
+    toast(mode === 'exam' ? '已切到真题模式' : '已切到复习模式');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // ------------------------------------------------------------------ 启动
 function bindTop() {
-  $('#datePicker').addEventListener('change', (e) => load(e.target.value));
+  $$('.mode-switch [data-mode]').forEach((btn) => {
+    btn.onclick = () => setMode(btn.dataset.mode);
+  });
   $('#btnImport').onclick = () => openModal($('#modalImport'));
   // 首屏 Hero 上的两个大按钮：和顶栏、空态按钮走同一条路
   const heroImport = $('#btnHeroImport');

@@ -159,14 +159,14 @@
     <section class="today" id="today">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Today / 今日</p>
+          <p class="eyebrow">Today / 今日 <span class="eyebrow-date" id="currentDate"></span></p>
           <h2>今天这一篇</h2>
         </div>
         <div class="today-tools">
-          <label class="field-inline">
-            <span class="field-label">日期</span>
-            <input type="date" id="datePicker" />
-          </label>
+          <div class="mode-switch" role="group" aria-label="文章模式">
+            <button type="button" data-mode="review">复习模式</button>
+            <button type="button" data-mode="exam">真题模式</button>
+          </div>
           <button class="btn ghost" id="btnImport">导入单词</button>
           <button class="btn primary" id="btnGenerate">生成文章 <span aria-hidden="true">↘</span></button>
         </div>

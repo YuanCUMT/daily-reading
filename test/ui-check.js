@@ -306,8 +306,48 @@ function seed() {
       const r = await (await fetch(`${BASE}/api/state`)).json();
       return r.config.prefs.mode === 'review';
     }, { label: '改回复习模式' });
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'review'`), { label: '前端拿到复习模式' });
     check('从设置里改回复习模式', true);
     await cdp.eval(`document.querySelector('#modalSettings [data-close]').click(); 'ok'`);
+
+    // ---------- 今日文章区头的模式开关 ----------
+    const modeBar = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        labels: [...document.querySelectorAll('.mode-switch [data-mode]')].map((b) => b.textContent.trim()),
+        on: [...document.querySelectorAll('.mode-switch [data-mode]')]
+          .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.mode),
+        inTools: !!document.querySelector('.today-tools .mode-switch'),
+        hasDatePicker: !!document.getElementById('datePicker')
+      })`)
+    );
+    check('今日文章区头有两个模式按钮', modeBar.labels.join('/') === '复习模式/真题模式', JSON.stringify(modeBar));
+    check('模式开关在「今日文章」的工具条里', modeBar.inTools === true, JSON.stringify(modeBar));
+    check('日期选择器已经换成模式开关', modeBar.hasDatePicker === false, JSON.stringify(modeBar));
+    check('当前亮着的是复习模式', modeBar.on.join() === 'review', JSON.stringify(modeBar));
+
+    await cdp.eval(`document.querySelector('.mode-switch [data-mode="exam"]').click(); 'ok'`);
+    await waitFor(async () => {
+      const r = await (await fetch(`${BASE}/api/state`)).json();
+      return r.config.prefs.mode === 'exam';
+    }, { label: '点开关切到真题模式' });
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'exam'`), { label: '前端拿到真题模式' });
+    const modeExam = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        on: [...document.querySelectorAll('.mode-switch [data-mode]')]
+          .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.mode),
+        hint: document.getElementById('modeTip')?.textContent || ''
+      })`)
+    );
+    check('点一下就切到真题模式', modeExam.on.join() === 'exam', JSON.stringify(modeExam));
+    check('设置弹窗里的提示也跟着变', modeExam.hint.includes('真题模式'), modeExam.hint);
+
+    await cdp.eval(`document.querySelector('.mode-switch [data-mode="review"]').click(); 'ok'`);
+    await waitFor(async () => {
+      const r = await (await fetch(`${BASE}/api/state`)).json();
+      return r.config.prefs.mode === 'review';
+    }, { label: '点开关切回复习模式' });
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'review'`), { label: '前端拿到复习模式' });
+    check('再点一下切回复习模式', (await cdp.eval(`document.querySelector('.mode-switch [data-mode="review"]').getAttribute('aria-pressed')`)) === 'true');
 
     // ---------- 截图识别 ----------
     await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
@@ -807,17 +847,21 @@ function seed() {
       `document.querySelectorAll('#archiveGrid .archive-card')[document.querySelectorAll('#archiveGrid .archive-card').length - 1].click(); 'ok'`
     );
     await waitFor(
-      () => cdp.eval(`document.getElementById('datePicker').value === ${JSON.stringify(targetDate)}`),
+      () => cdp.eval(`state.date === ${JSON.stringify(targetDate)}`),
       { label: '打开历史文章' }
     );
     const opened = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        date: document.getElementById('datePicker').value,
+        date: state.date,
+        label: document.getElementById('currentDate').textContent.trim(),
         title: document.querySelector('.article-head h2')?.textContent.trim() || '',
         scrolled: window.scrollY
       })`)
     );
     check('点卡片会切换到那一天的文章', opened.date === targetDate, JSON.stringify(opened));
+    const today = await cdp.eval(`state.today`);
+    const wantLabel = targetDate === today ? '今天' : targetDate.replace(/-/g, '/');
+    check('标题旁显示的是那一天', opened.label === wantLabel, JSON.stringify(opened));
     check('切换后正文有标题', opened.title.length > 0, opened.title);
 
     // 导航：滚到历史文章区，横线跟过去

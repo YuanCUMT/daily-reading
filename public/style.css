@@ -955,6 +955,25 @@ kbd {
 .today-tools { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .today-tools .field-inline { min-width: 148px; }
 
+/* 真题 / 复习 开关：两段并排，选中的反白 */
+.mode-switch { display: inline-flex; border: 1px solid var(--ink); background: var(--paper); }
+.mode-switch button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  padding: 0 14px; min-height: 38px;
+  font: inherit; font-size: 12.5px; font-weight: 700; letter-spacing: .1px;
+  color: var(--ink); white-space: nowrap;
+}
+.mode-switch button + button { border-left: 1px solid var(--ink); }
+.mode-switch button:hover { background: var(--tint); }
+.mode-switch button.is-on { background: var(--ink); color: var(--paper); }
+.mode-switch button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.eyebrow-date {
+  margin-left: 8px; letter-spacing: .4px; text-transform: none;
+  font-weight: 600; color: var(--ink);
+}
+.eyebrow-date:not(:empty)::before { content: '·'; margin-right: 8px; color: var(--grid); }
+
 /* 搜索条：标签 / 输入 / 计数 三栏，和剪藏台同一套 */
 .search-panel {
   display: grid; grid-template-columns: 92px minmax(0, 1fr) auto;
@@ -1064,5 +1083,7 @@ kbd {
   .section-heading h2 { font-size: 24px; }
   .today-tools { width: 100%; }
   .today-tools .field-inline { flex: 1 1 100%; }
+  .mode-switch { flex: 1 1 100%; }
+  .mode-switch button { flex: 1 1 0; }
   .today-tools .btn { flex: 1 1 0; }
 }
