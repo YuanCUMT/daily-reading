@@ -255,6 +255,10 @@ async function handleApi(req, res, url) {
     });
   }
 
+  if (p === '/api/articles' && req.method === 'GET') {
+    return ok(res, { articles: store.listArticleSummaries() });
+  }
+
   if (p === '/api/config' && req.method === 'POST') {
     const body = await readBody(req);
     const patch = {};
@@ -326,7 +330,16 @@ async function handleApi(req, res, url) {
     }
 
     const saved = store.saveWords(date, { source: body.source || '手动输入', words });
-    return ok(res, { words: saved, added, skipped, total: saved.words.length, mode: body.mode === 'replace' ? 'replace' : 'merge' });
+    // 这里刻意不把导入的词自动塞进生词本：生词本 = 阅读时自己点 ☆ 收的词，
+    // 自动灌进去会让「我的生词」变成第二份词表，短语表也会被单词淹没。
+    return ok(res, {
+      words: saved,
+      added,
+      skipped,
+      total: saved.words.length,
+      marksAdded: 0,
+      mode: body.mode === 'replace' ? 'replace' : 'merge',
+    });
   }
 
   if (p === '/api/words' && req.method === 'DELETE') {
@@ -557,6 +570,17 @@ async function handleApi(req, res, url) {
       articleDate: body.articleDate ? store.normalizeDate(body.articleDate) : undefined,
     });
     return ok(res, saved);
+  }
+
+  if (p === '/api/marks/mastered' && req.method === 'POST') {
+    const body = await readBody(req);
+    const word = String(body.word || '').trim();
+    if (!word) return fail(res, '单词为空');
+    try {
+      return ok(res, store.setMarkMastered(word, !!body.mastered));
+    } catch (err) {
+      return fail(res, err.message || String(err), 400);
+    }
   }
 
   if (p === '/api/marks' && req.method === 'DELETE') {

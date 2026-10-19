@@ -230,36 +230,72 @@ function seed() {
     check('弹窗默认关闭', initial.modalsHidden === true);
     check('没有 JS 报错', cdp.consoleErrors.length === 0 && cdp.pageErrors.length === 0, JSON.stringify([...cdp.consoleErrors, ...cdp.pageErrors]));
 
-    // ---------- 顶栏一键切模式 ----------
-    const quick0 = await cdp.eval(`document.getElementById('modeQuick').value`);
-    check('顶栏有一键切换模式，默认复习模式', quick0 === 'review', String(quick0));
+    // ---------- 顶栏是导航，模式挪进了设置 ----------
+    const topbar = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        navItems: [...document.querySelectorAll('.page-nav a')].map((a) => a.textContent.trim().replace(/\\s+/g, ' ')),
+        hasModeSelect: !!document.getElementById('modeQuick'),
+        settingsInHeader: !!document.querySelector('.site-header #btnSettings'),
+        headerButtons: [...document.querySelectorAll('.site-header button')].map((b) => b.id)
+      })`)
+    );
+    check('顶栏有导航：今日文章 / 历史文章 / 生词本',
+      topbar.navItems.length === 3 && topbar.navItems[0].startsWith('今日文章') &&
+        topbar.navItems[1].startsWith('历史文章') && topbar.navItems[2].startsWith('生词本'),
+      JSON.stringify(topbar.navItems));
+    check('顶栏没有模式下拉', topbar.hasModeSelect === false);
+    check('设置按钮在顶栏里', topbar.settingsInHeader === true);
+    check(
+      '顶栏按钮只有单词本和设置',
+      topbar.headerButtons.join(',') === 'btnVocab,btnSettings',
+      topbar.headerButtons.join(',')
+    );
 
+    // 设置里改模式 → 存到服务端，文章头跟着变
+    await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
+    await sleep(200);
     await cdp.eval(`(() => {
-      const s = document.getElementById('modeQuick');
+      const s = document.getElementById('cfgMode');
       s.value = 'exam';
       s.dispatchEvent(new Event('change'));
+      document.getElementById('btnSaveSettings').click();
       return 'ok';
     })()`);
     await waitFor(async () => {
       const r = await (await fetch(`${BASE}/api/state`)).json();
       return r.config.prefs.mode === 'exam';
     }, { label: '模式已存到服务端' });
-    check('切换后立刻保存到服务端', true);
+    check('在设置里改模式会存到服务端', true);
 
-    // 打开设置，下拉框应该已经同步成真题模式
+    // 等前端把新配置拉回来再继续，否则后面的断言会读到上一份配置
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'exam'`), { label: '前端已拿到新配置' });
+    const rightAfterSave = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        stateMode: (state.config || {}).prefs?.mode,
+        cfgMode: document.getElementById('cfgMode').value,
+        hidden: document.getElementById('modalSettings').hidden,
+        limitHidden: document.getElementById('examLimitRow').hidden
+      })`)
+    );
+    check('保存后前端状态已是真题模式', rightAfterSave.stateMode === 'exam', JSON.stringify(rightAfterSave));
+    check('保存后下拉仍是真题模式', rightAfterSave.cfgMode === 'exam', JSON.stringify(rightAfterSave));
+
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
     await sleep(200);
-    const synced = JSON.parse(
+    const modeState = JSON.parse(
       await cdp.eval(`JSON.stringify({
+        dbgStateMode: (typeof state !== 'undefined' ? (state.config || {}).prefs?.mode : 'no-state'),
+        dbgHidden: document.getElementById('modalSettings').hidden,
+        dbgStatus: document.getElementById('settingsStatus').textContent,
         modal: document.getElementById('cfgMode').value,
         limitRowHidden: document.getElementById('examLimitRow').hidden
       })`)
     );
-    check('设置里的模式跟着同步', synced.modal === 'exam', JSON.stringify(synced));
-    check('同步后「每篇用词数」可见', synced.limitRowHidden === false);
+    check('设置里的模式下拉是当前值', modeState.modal === 'exam', JSON.stringify(modeState));
+    check('真题模式下「每篇用词数」可见', modeState.limitRowHidden === false);
     await cdp.eval(`document.querySelector('#modalSettings [data-close]').click(); 'ok'`);
 
-    // 再从设置里切回复习模式，顶栏也要跟着变
+    // 改回复习模式，后面的用例按复习模式的预期走
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
     await sleep(150);
     await cdp.eval(`(() => {
@@ -269,9 +305,52 @@ function seed() {
       document.getElementById('btnSaveSettings').click();
       return 'ok';
     })()`);
-    await waitFor(() => cdp.eval(`document.getElementById('modeQuick').value === 'review'`), { label: '顶栏同步回复习模式' });
-    check('从设置里改模式，顶栏也跟着变', true);
+    await waitFor(async () => {
+      const r = await (await fetch(`${BASE}/api/state`)).json();
+      return r.config.prefs.mode === 'review';
+    }, { label: '改回复习模式' });
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'review'`), { label: '前端拿到复习模式' });
+    check('从设置里改回复习模式', true);
     await cdp.eval(`document.querySelector('#modalSettings [data-close]').click(); 'ok'`);
+
+    // ---------- 今日文章区头的模式开关 ----------
+    const modeBar = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        labels: [...document.querySelectorAll('.mode-switch [data-mode]')].map((b) => b.textContent.trim()),
+        on: [...document.querySelectorAll('.mode-switch [data-mode]')]
+          .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.mode),
+        inTools: !!document.querySelector('.today-tools .mode-switch'),
+        hasDatePicker: !!document.getElementById('datePicker')
+      })`)
+    );
+    check('今日文章区头有两个模式按钮', modeBar.labels.join('/') === '复习模式/真题模式', JSON.stringify(modeBar));
+    check('模式开关在「今日文章」的工具条里', modeBar.inTools === true, JSON.stringify(modeBar));
+    check('日期选择器已经换成模式开关', modeBar.hasDatePicker === false, JSON.stringify(modeBar));
+    check('当前亮着的是复习模式', modeBar.on.join() === 'review', JSON.stringify(modeBar));
+
+    await cdp.eval(`document.querySelector('.mode-switch [data-mode="exam"]').click(); 'ok'`);
+    await waitFor(async () => {
+      const r = await (await fetch(`${BASE}/api/state`)).json();
+      return r.config.prefs.mode === 'exam';
+    }, { label: '点开关切到真题模式' });
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'exam'`), { label: '前端拿到真题模式' });
+    const modeExam = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        on: [...document.querySelectorAll('.mode-switch [data-mode]')]
+          .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.mode),
+        hint: document.getElementById('modeTip')?.textContent || ''
+      })`)
+    );
+    check('点一下就切到真题模式', modeExam.on.join() === 'exam', JSON.stringify(modeExam));
+    check('设置弹窗里的提示也跟着变', modeExam.hint.includes('真题模式'), modeExam.hint);
+
+    await cdp.eval(`document.querySelector('.mode-switch [data-mode="review"]').click(); 'ok'`);
+    await waitFor(async () => {
+      const r = await (await fetch(`${BASE}/api/state`)).json();
+      return r.config.prefs.mode === 'review';
+    }, { label: '点开关切回复习模式' });
+    await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'review'`), { label: '前端拿到复习模式' });
+    check('再点一下切回复习模式', (await cdp.eval(`document.querySelector('.mode-switch [data-mode="review"]').getAttribute('aria-pressed')`)) === 'true');
 
     // ---------- 截图识别 ----------
     await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
@@ -402,6 +481,10 @@ function seed() {
     const clickedWord = await cdp.eval(`(() => {
       try { window.getSelection().removeAllRanges(); } catch {}
       const p = document.querySelector('.para[data-para="0"] .en');
+      // 新版页面首屏有 hero + 台账，正文可能落在窗口下沿之外；
+      // elementFromPoint / caretRangeFromPoint 只认视口内坐标，先滚到中间再取。
+      // 必须用 instant —— 页面开了 scroll-behavior: smooth，动画没走完时量到的还是旧坐标
+      p.scrollIntoView({ block: 'center', behavior: 'instant' });
       const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
       let node, hit = null;
       while ((node = walker.nextNode())) {
@@ -445,21 +528,28 @@ function seed() {
     fs.writeFileSync(SHOT_LOOKUP, Buffer.from(shotLookup.data, 'base64'));
     check('划词浮层截图已保存', fs.existsSync(SHOT_LOOKUP) && fs.statSync(SHOT_LOOKUP).size > 10000);
 
+    const marksBefore = Number(await cdp.eval(`state.marks.length`));
+    check('导入的单词不会自动进生词本', marksBefore === 0, String(marksBefore));
+
     await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '收藏入生词本' });
+    await waitFor(() => cdp.eval(`state.marks.some((m) => m.word === 'paragraph')`), { label: '收藏入生词本' });
     const marks1 = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        n: document.querySelectorAll('#markList .mark-chip').length,
+        total: state.marks.length,
+        chips: document.querySelectorAll('#markList .mark-chip').length,
         word: document.querySelector('#markList .mark-chip .w')?.textContent,
         cn: document.querySelector('#markList .mark-chip .m')?.textContent,
         btn: document.querySelector('#popover [data-mark]')?.textContent || '',
-        count: document.getElementById('markCount').textContent
+        count: document.getElementById('markCount').textContent,
+        more: document.querySelector('#markList .mk-more')?.textContent.trim() || ''
       })`)
     );
-    check('收藏后生词本里有这个词', marks1.n === 1 && marks1.word === 'paragraph', JSON.stringify(marks1));
+    check('收藏后生词本里有这个词', marks1.total === marksBefore + 1 && marks1.word === 'paragraph', JSON.stringify(marks1));
     check('生词本记住了释义', marks1.cn.includes('中文释义'), marks1.cn);
     check('收藏后按钮变成「已在生词本」', marks1.btn.includes('已在生词本'), marks1.btn);
-    check('生词本计数同步', marks1.count === '1', marks1.count);
+    check('生词本计数同步', marks1.count === String(marks1.total), JSON.stringify(marks1));
+    check('侧栏最多只露三个词', marks1.chips === Math.min(3, marks1.total), JSON.stringify(marks1));
+    check('多出来的词有「还有 N 个」提示', marks1.total > 3 ? /还有\s*\d+\s*个/.test(marks1.more) : marks1.more === '', JSON.stringify(marks1));
 
     // 生词本要能一眼看全：多行卡片 + 不截断 + 侧栏可滚动
     const markLayout = JSON.parse(
@@ -482,29 +572,27 @@ function seed() {
     check('生词本里的释义不再被省略号截断', markLayout.wrapped && markLayout.notClipped, JSON.stringify(markLayout));
     check('侧栏与生词本都能滚动', markLayout.sideOverflow === 'auto' && markLayout.listOverflow === 'auto', JSON.stringify(markLayout));
 
-    // 塞满生词本，验证真的能滚到底（不是只有 overflow 属性写着 auto）
-    const scrollInfo = JSON.parse(
+    // 侧栏只露前三个词（其余去生词本页），塞 12 个进去验证不会撑长面板
+    const sidebarLimit = JSON.parse(
       await cdp.eval(`JSON.stringify((() => {
         window.__realMarks = state.marks.slice();
         state.marks = window.__realMarks.concat(Array.from({ length: 12 }, (_, i) => ({
           word: 'zzsample' + i,
-          cn: '很长的示例释义，用来把生词本撑高，看看滚轮能不能划到底 ' + i,
+          cn: '很长的示例释义 ' + i,
           pos: 'n.',
           collocation: 'sample sth'
         })));
         renderMarks();
-        const box = document.getElementById('markList');
-        const before = box.scrollTop;
-        box.scrollTop = box.scrollHeight;
-        const after = box.scrollTop;
         return {
-          overflows: box.scrollHeight > box.clientHeight + 2,
-          scrolled: after > before + 10,
-          count: document.querySelectorAll('#markList .mark-chip').length
+          chips: document.querySelectorAll('#markList .mark-chip').length,
+          total: state.marks.length,
+          count: document.getElementById('markCount').textContent,
+          first: document.querySelector('#markList .mark-chip .w')?.textContent
         };
       })())`)
     );
-    check('生词本变长后能滚到底', scrollInfo.overflows && scrollInfo.scrolled, JSON.stringify(scrollInfo));
+    check('侧栏只显示前三个生词', sidebarLimit.chips === 3, JSON.stringify(sidebarLimit));
+    check('面板标题上的计数仍是全部词数', sidebarLimit.count === String(sidebarLimit.total), JSON.stringify(sidebarLimit));
     await cdp.eval(`state.marks = window.__realMarks; renderMarks(); 'ok'`);
 
     // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
@@ -521,33 +609,33 @@ function seed() {
     check('收藏后正文立刻给这个词上高亮', wrapped.mine > 0 && wrapped.inPara === true, JSON.stringify(wrapped));
     check('变色的词就是刚才点的词', String(wrapped.hw).toLowerCase() === 'paragraph', wrapped.hw);
 
-    // 标一个今日目标词：正文里应该从黄底变成「生词本」样式
+    // 今日目标词默认不在生词本里，点开浮层只会查词、不会自动收词
     await cdp.eval(`document.querySelector('#articleView mark.word:not(.mine)').click(); 'ok'`);
     await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层' });
-    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 2`), {
-      label: '收藏目标词',
-    });
-    const marks2 = JSON.parse(
+    const targetMark = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        chips: document.querySelectorAll('#markList .mark-chip').length,
-        mine: document.querySelectorAll('#articleView mark.word.mine').length
+        total: state.marks.length,
+        btn: document.querySelector('#popover [data-mark]')?.textContent || '',
+        mine: document.querySelectorAll('#articleView mark.word.mine').length,
+        targetBlue: [...document.querySelectorAll('#articleView mark.word.mine')]
+          .filter((e) => state.targetSet.has(String(e.dataset.hw).toLowerCase())).length
       })`)
     );
-    check('生词本里现在有两项', marks2.chips === 2, JSON.stringify(marks2));
-    check('标过的目标词在正文里换了样式', marks2.mine >= 2, JSON.stringify(marks2));
+    check('今日目标词默认不在生词本里', /☆ 收藏/.test(targetMark.btn), targetMark.btn);
+    check('点开浮层不会自动收词', targetMark.total === marksBefore + 1, JSON.stringify(targetMark));
+    check('今日目标词仍是黄色，只有收藏来的生词变蓝', targetMark.mine > 0 && targetMark.targetBlue === 0, JSON.stringify(targetMark));
 
     // 从侧栏移除刚才那个非目标词：正文里要拆回纯文本，不能留下目标词的黄色样式
     await cdp.eval(`document.querySelector('#markList [data-rm="paragraph"]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`document.querySelectorAll('#markList .mark-chip').length === 1`), { label: '移出生词本' });
+    await waitFor(() => cdp.eval(`state.marks.length === ${marksBefore}`), { label: '移出生词本' });
     const afterRemove = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        chips: document.querySelectorAll('#markList .mark-chip').length,
+        total: state.marks.length,
         left: document.querySelectorAll('mark.word[data-hw="paragraph"]').length,
         stillMarked: document.querySelectorAll('#markList .mark-chip .w')[0]?.textContent
       })`)
     );
-    check('能从侧栏把词移出生词本', afterRemove.chips === 1, JSON.stringify(afterRemove));
+    check('能从侧栏把词移出生词本', afterRemove.total === marksBefore, JSON.stringify(afterRemove));
     check('移出后这个词在正文里变回纯文本', afterRemove.left === 0, JSON.stringify(afterRemove));
 
     // ---------- 框选短语查词（真的用鼠标拖选，不是伪造 selection）----------
@@ -655,9 +743,16 @@ function seed() {
       () => cdp.eval(`!document.querySelector('mark.word.mine[data-hw="talk about"]')`),
       { label: '短语移出生词本' }
     );
-    check('短语也能从侧栏移除', (await cdp.eval(`document.querySelectorAll('#markList .mark-chip').length`)) === 1);
+    check('短语也能从侧栏移除', (await cdp.eval(`state.marks.some((m) => m.word === 'talk about')`)) === false);
 
     // ---- 单词本 ----
+    // 前面把收藏的词都清掉了，先正经收藏一个，单词本才有的可看
+    await cdp.eval(`document.querySelector('#articleView mark.word[data-hw="abandon"]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层（收藏用）' });
+    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`state.marks.length === 1`), { label: '收藏一个词用来检查单词本' });
+    await cdp.eval(`document.querySelector('#popover [data-close]')?.click(); 'ok'`);
+
     await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
     await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '打开单词本' });
     const vocab1 = JSON.parse(
@@ -827,6 +922,109 @@ function seed() {
     await sleep(200);
     check('切换「显示中文」后译文可见', (await cdp.eval(`document.querySelectorAll('#articleView .zh:not([hidden])').length`)) === 5);
 
+    // ---------- 历史文章：卡片栅格 / 搜索 / 打开 ----------
+    const archive = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        cards: document.querySelectorAll('#archiveGrid .archive-card').length,
+        status: document.getElementById('archiveStatus').textContent.trim(),
+        emptyHidden: document.getElementById('archiveEmpty').hidden,
+        hasSpine: document.querySelectorAll('#archiveGrid .archive-card .card-spine').length,
+        accents: [...document.querySelectorAll('#archiveGrid .archive-card')].map((c) => c.dataset.accent),
+        titles: [...document.querySelectorAll('#archiveGrid .card-title')].map((h) => h.textContent.trim()),
+        firstDate: document.querySelector('#archiveGrid .archive-card')?.dataset.date
+      })`)
+    );
+    check('历史文章是卡片栅格', archive.cards >= 1 && archive.hasSpine === archive.cards, JSON.stringify(archive));
+    // 卡片可能只有一两张，逐张校验轮换关系（第 i 张 = i % 3）
+    const accentsOk = archive.accents.every((v, i) => v === String(i % 3));
+    check('卡片按三色轮换强调色', accentsOk, archive.accents.join(','));
+    check('第一张卡片是最新那篇', archive.firstDate === new Date().toISOString().slice(0, 10), String(archive.firstDate));
+    check('有文章时不显示空态', archive.emptyHidden === true);
+    check('状态行写了篇数', /共 \d+ 篇/.test(archive.status), archive.status);
+
+    // 搜索：搜不存在的词应该给出「没找到」，搜标题里的词应该筛出一张
+    const needle = archive.titles[0].split(' ')[0] || 'the';
+    await cdp.eval(`(() => {
+      const i = document.getElementById('archiveSearch');
+      i.value = ${JSON.stringify(needle.slice(0, 4))};
+      i.dispatchEvent(new Event('input'));
+      return 'ok';
+    })()`);
+    await sleep(200);
+    const searched = await cdp.eval(`document.querySelectorAll('#archiveGrid .archive-card').length`);
+    check('搜索能筛出对应的卡片', searched >= 1 && searched <= archive.cards, `${needle} → ${searched}`);
+
+    await cdp.eval(`(() => {
+      const i = document.getElementById('archiveSearch');
+      i.value = 'zzzz没有这篇';
+      i.dispatchEvent(new Event('input'));
+      return 'ok';
+    })()`);
+    await sleep(200);
+    const noHit = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        cards: document.querySelectorAll('#archiveGrid .archive-card').length,
+        note: !!document.querySelector('#archiveGrid .archive-noresult')
+      })`)
+    );
+    check('搜不到时给出提示而不是空白', noHit.cards === 0 && noHit.note === true, JSON.stringify(noHit));
+
+    await cdp.eval(`(() => {
+      const i = document.getElementById('archiveSearch');
+      i.value = '';
+      i.dispatchEvent(new Event('input'));
+      return 'ok';
+    })()`);
+    await sleep(150);
+
+    // 点最后一张卡片：应该换成那天的文章，并滚回「今日文章」
+    const targetDate = await cdp.eval(
+      `(() => { const all = document.querySelectorAll('#archiveGrid .archive-card'); return all[all.length - 1].dataset.date; })()`
+    );
+    await cdp.eval(
+      `document.querySelectorAll('#archiveGrid .archive-card')[document.querySelectorAll('#archiveGrid .archive-card').length - 1].click(); 'ok'`
+    );
+    await waitFor(
+      () => cdp.eval(`state.date === ${JSON.stringify(targetDate)}`),
+      { label: '打开历史文章' }
+    );
+    const opened = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        date: state.date,
+        label: document.getElementById('currentDate').textContent.trim(),
+        title: document.querySelector('.article-head h2')?.textContent.trim() || '',
+        scrolled: window.scrollY
+      })`)
+    );
+    check('点卡片会切换到那一天的文章', opened.date === targetDate, JSON.stringify(opened));
+    const today = await cdp.eval(`state.today`);
+    const wantLabel = targetDate === today ? '今天' : targetDate.replace(/-/g, '/');
+    check('标题旁显示的是那一天', opened.label === wantLabel, JSON.stringify(opened));
+    check('切换后正文有标题', opened.title.length > 0, opened.title);
+
+    // 导航：滚到历史文章区，横线跟过去
+    await cdp.eval(`document.getElementById('archive').scrollIntoView({ block: 'start', behavior: 'instant' }); 'ok'`);
+    await sleep(400);
+    const navState = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        active: document.querySelector('.page-nav a[aria-current="page"]')?.dataset.section || '',
+        scrollY: Math.round(window.scrollY),
+        archiveTop: Math.round(document.getElementById('archive').getBoundingClientRect().top),
+        todayTop: Math.round(document.getElementById('today').getBoundingClientRect().top),
+        line: Math.round(document.querySelector('.site-header').getBoundingClientRect().height) + 24,
+        scrollH: document.documentElement.scrollHeight,
+        innerH: window.innerHeight
+      })`)
+    );
+    check('滚到历史文章时导航点亮「历史文章」', navState.active === 'archive', JSON.stringify(navState));
+
+    await cdp.eval(`window.scrollTo({ top: 0, behavior: 'instant' }); 'ok'`);
+    await sleep(300);
+    const navTop = await cdp.eval(
+      `document.querySelector('.page-nav a[aria-current="page"]')?.dataset.section || ''`
+    );
+    check('回到首屏时导航点亮「今日文章」', navTop === 'today', String(navTop));
+
     // ---------- 设置 ----------
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
     await sleep(200);
@@ -900,6 +1098,180 @@ function seed() {
     const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
     fs.writeFileSync(SHOT, Buffer.from(shot.data, 'base64'));
     check('截图已保存', fs.existsSync(SHOT) && fs.statSync(SHOT).size > 10000, `${fs.statSync(SHOT).size} bytes`);
+
+    // ---------- 生词本独立页 ----------
+    // 先准备 3 个词：两个今天收藏、一个「已掌握」，用来验证分组与两摞的边界
+    const stamp = new Date().toISOString();
+    for (const w of [
+      { word: 'ledger', cn: '账簿', phonetic: '/ˈledʒə(r)/', pos: 'n.' },
+      { word: 'derelict', cn: '荒废的；被遗弃的', phonetic: '/ˈderəlɪkt/', pos: 'adj.' },
+    ]) {
+      await fetch(`${BASE}/api/marks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...w, articleDate: stamp.slice(0, 10) }),
+      });
+    }
+    await fetch(`${BASE}/api/marks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word: 'quaint', cn: '古怪而有趣的', phonetic: '/kweɪnt/', pos: 'adj.' }),
+    });
+    const masteredSeed = await (
+      await fetch(`${BASE}/api/marks/mastered`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: 'quaint', mastered: true }),
+      })
+    ).json();
+    check('接口能把词标成已掌握', !!masteredSeed.marks?.find((m) => m.word === 'quaint')?.mastered);
+
+    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
+    await waitFor(() => cdp.eval(`!!document.getElementById('learningList') && document.querySelectorAll('#learningList .mark-row').length > 0`).catch(() => false), {
+      label: '生词本页渲染',
+    });
+
+    // 期望值从接口算，别把断言写死成「正好 2 条」——这轮测试前面还收藏过别的词
+    const marksNow = await (await fetch(`${BASE}/api/marks`)).json();
+    const expectLearning = marksNow.marks.filter((m) => !m.mastered).length;
+    const expectMastered = marksNow.marks.filter((m) => m.mastered).length;
+    const expectDays = new Set(marksNow.marks.map((m) => String(m.addedAt || '').slice(0, 10))).size;
+
+    const page1 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        title: document.title,
+        learningRows: document.querySelectorAll('#learningList .mark-row').length,
+        learningCount: document.getElementById('countLearning').textContent,
+        masteredRows: document.querySelectorAll('#masteredList .mark-row').length,
+        masteredCount: document.getElementById('countMastered').textContent,
+        dayHeads: document.querySelectorAll('#learningList .day-head').length,
+        dayRules: document.querySelectorAll('#learningList .day-rule').length,
+        todayTags: document.querySelectorAll('#learningList .day-head .day-tag').length,
+        ruleWidth: (() => {
+          const r = document.querySelector('#learningList .day-rule');
+          if (!r) return '';
+          const cs = getComputedStyle(r);
+          return cs.borderTopWidth + ' ' + cs.borderTopStyle;
+        })(),
+        rulePx: Math.round(document.querySelector('#learningList .day-rule')?.getBoundingClientRect().width || 0),
+        rowPx: Math.round(document.querySelector('#learningList .mark-row')?.getBoundingClientRect().width || 0),
+        navCount: document.getElementById('navCount').textContent,
+        navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || '',
+        hasSummaryLink: !!document.querySelector('#markSummary'),
+        subItems: [...document.querySelectorAll('.sub-nav a')].map((a) => a.textContent.trim().split(' ')[0]),
+        subCounts: [
+          document.getElementById('subCountLearning')?.textContent,
+          document.getElementById('subCountMastered')?.textContent
+        ],
+        subCurrent: document.querySelector('.sub-nav a[aria-current="page"]')?.dataset.jump || '',
+        subSticky: (() => {
+          const n = document.querySelector('.sub-nav');
+          return n ? getComputedStyle(n).position : '';
+        })()
+      })`)
+    );
+
+    check('生词本页标题正确', page1.title.includes('生词本'), page1.title);
+    check('生词本页把词分成两摞', page1.learningRows === expectLearning && page1.masteredRows === expectMastered, JSON.stringify(page1) + ` 期望 ${expectLearning}/${expectMastered}`);
+    check('两摞的计数与行数一致', page1.learningCount === String(expectLearning) && page1.masteredCount === String(expectMastered), JSON.stringify(page1));
+    check('按天分组（一天一组）', page1.dayHeads === expectDays, `${page1.dayHeads} 组 / 期望 ${expectDays}`);
+    check('每组都有一条分割横线', page1.dayRules === page1.dayHeads, JSON.stringify(page1));
+    check('横线是真的画出来的粗长线', page1.ruleWidth === '2px solid' && page1.rulePx >= page1.rowPx - 2, JSON.stringify(page1));
+    check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
+    check('导航上生词本高亮且带计数', page1.navCurrent.includes('生词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
+    check('主页侧栏不再显示「学习中 · 已掌握」那行小字', page1.hasSummaryLink === false, String(page1.hasSummaryLink));
+
+    // 生词本页内的分区小导航：学习中 / 已掌握，粘在顶栏下面
+    check('生词本有「学习中 / 已掌握」小导航',
+      page1.subItems[0] === '学习中' && page1.subItems[1] === '已掌握', JSON.stringify(page1.subItems));
+    check('小导航显示两摞的数量',
+      page1.subCounts[0] === String(expectLearning) && page1.subCounts[1] === String(expectMastered),
+      JSON.stringify(page1.subCounts));
+    check('小导航吸顶', page1.subSticky === 'sticky', page1.subSticky);
+    check('默认点亮「学习中」', page1.subCurrent === 'learningSection', page1.subCurrent);
+
+    // 点小导航跳到「已掌握」，横线也要跟过去
+    await cdp.eval(`document.querySelector('.sub-nav a[data-jump="masteredSection"]').click(); 'ok'`);
+    await sleep(900);
+    const subJump = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        current: document.querySelector('.sub-nav a[aria-current="page"]')?.dataset.jump || '',
+        scrolled: Math.round(window.scrollY)
+      })`)
+    );
+    check('点「已掌握」会滚过去并点亮它', subJump.current === 'masteredSection', JSON.stringify(subJump));
+    check('点小导航确实滚动了页面', subJump.scrolled > 0, String(subJump.scrolled));
+
+    // 再塞一个「昨天」收藏的词：接口只收前端字段，不认 addedAt，所以直接改数据文件造一天前
+    const marksFile = path.join(DATA, 'marks.json');
+    const marksDoc = JSON.parse(fs.readFileSync(marksFile, 'utf8'));
+    marksDoc.marks.push({
+      word: 'wee',
+      cn: '极小的',
+      pos: 'adj.',
+      addedAt: new Date(Date.now() - 86400000).toISOString(),
+    });
+    fs.writeFileSync(marksFile, JSON.stringify(marksDoc, null, 2));
+    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#learningList .day-head').length >= 2`).catch(() => false), {
+      label: '两天分成两组',
+    });
+    const page2 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        groups: document.querySelectorAll('#learningList .day-group').length,
+        rules: document.querySelectorAll('#learningList .day-rule').length,
+        labels: [...document.querySelectorAll('#learningList .day-head h4')].map(h => h.textContent.replace(/\\s+/g, ' ').trim())
+      })`)
+    );
+    check('两天的词分成两组', page2.groups === 2, JSON.stringify(page2));
+    check('两组各有一条长横线', page2.rules === 2, JSON.stringify(page2));
+    check('日期新的排在前面（19 号在 18 号前）', /19 日/.test(page2.labels[0]) && /18 日/.test(page2.labels[1]), JSON.stringify(page2.labels));
+
+    // 点「已掌握」：这个词应该从学习中挪到已掌握
+    await cdp.eval(`(() => {
+      const row = document.querySelector('#learningList .mark-row[data-word="ledger"]');
+      row.querySelector('[data-act="master"]').click();
+      return 'clicked';
+    })()`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#masteredList .mark-row[data-word="ledger"]').length === 1`), {
+      label: '标记已掌握后挪到另一摞',
+    });
+    const afterMaster = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        learning: document.querySelectorAll('#learningList .mark-row').length,
+        mastered: document.querySelectorAll('#masteredList .mark-row').length,
+        masterLabel: document.querySelector('#masteredList .mark-row[data-word="ledger"] [data-act="master"]')?.textContent
+      })`)
+    );
+    check('标成已掌握后从学习中消失', afterMaster.learning === expectLearning, JSON.stringify(afterMaster));
+    check('标成已掌握后出现在已掌握那摞', afterMaster.mastered === expectMastered + 1, JSON.stringify(afterMaster));
+    check('已掌握那行给的是「退回学习」', afterMaster.masterLabel === '退回学习', String(afterMaster.masterLabel));
+
+    // 再点回去
+    await cdp.eval(`document.querySelector('#masteredList .mark-row[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#learningList .mark-row[data-word="ledger"]').length === 1`), {
+      label: '退回学习',
+    });
+    check('能退回学习中', true);
+
+    // 空态文案：清空后两段都该给提示
+    const cleared = await (
+      await fetch(`${BASE}/api/marks?all=1`, { method: 'DELETE' })
+    ).json();
+    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
+    await waitFor(() => cdp.eval(`!document.getElementById('learningEmpty').hidden`).catch(() => false), {
+      label: '空态提示',
+    });
+    const emptyUi = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        marks: document.querySelectorAll('.mark-row').length,
+        learningEmpty: !document.getElementById('learningEmpty').hidden,
+        masteredEmpty: !document.getElementById('masteredEmpty').hidden,
+        learningCount: document.getElementById('countLearning').textContent
+      })`)
+    );
+    check('生词本清空后没有行', emptyUi.marks === 0 && cleared.marks.length === 0, JSON.stringify(emptyUi));
+    check('两摞都显示空态提示', emptyUi.learningEmpty && emptyUi.masteredEmpty, JSON.stringify(emptyUi));
 
     ws.close();
   } catch (err) {

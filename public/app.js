@@ -46,6 +46,8 @@ async function api(path, options = {}) {
 }
 
 let toastTimer;
+// 侧栏「我的生词」最多露几个词，其余去生词本页看
+const SIDEBAR_MARKS = 3;
 function toast(msg, isError = false) {
   const el = $('#toast');
   el.textContent = msg;
@@ -72,9 +74,19 @@ async function load(date) {
   state.words = data.words;
   state.article = data.article;
   setMarks(data.marks || []);
-  $('#datePicker').value = state.date;
+  await loadArchive();
   renderAll();
   migrateOldStars();
+}
+
+/** 历史文章摘要（首页那块卡片栅格用），失败不影响阅读 */
+async function loadArchive() {
+  try {
+    const r = await api('/api/articles');
+    state.articles = Array.isArray(r.articles) ? r.articles : [];
+  } catch {
+    state.articles = (state.dates || []).map((d) => ({ date: d, title: '', titleZh: '', mode: 'review', paragraphs: 0, wordCount: 0 }));
+  }
 }
 
 /** 生词本列表变化后，同步集合与侧栏 */
@@ -117,8 +129,28 @@ function renderAll() {
   renderMarks();
   renderArticle();
   $('#btnGenerate').disabled = !(state.words?.words?.length);
-  const mode = state.config?.prefs?.mode === 'exam' ? 'exam' : 'review';
-  if ($('#modeQuick').value !== mode) $('#modeQuick').value = mode;
+  const dateLabel = $('#currentDate');
+  if (dateLabel) dateLabel.textContent = state.date === state.today ? '今天' : state.date.replace(/-/g, '/');
+  syncModeSwitch();
+  syncLedger();
+  syncNav();
+}
+
+// 首屏那条「台账」：数字跟着读写实时变，没生成文章时「本篇用到」显示破折号
+function syncLedger() {
+  const set = (sel, value) => {
+    const el = $(sel);
+    if (el) el.textContent = String(value);
+  };
+  const words = state.words?.words?.length || 0;
+  const marks = state.marks?.length || 0;
+  const days = state.dates?.length || 0;
+  const a = state.article;
+  const used = a ? (a.usedWords || a.words || []).length : null;
+  set('#ledgerWords', words);
+  set('#ledgerUsed', used === null ? '—' : used);
+  set('#ledgerMarks', marks);
+  set('#ledgerDays', days);
 }
 
 function renderWords() {
@@ -140,32 +172,119 @@ function renderWords() {
 }
 
 function renderArchive() {
-  const box = $('#archive');
-  if (!state.dates.length) {
-    box.innerHTML = '<p class="tip" style="margin:0">还没有历史文章。</p>';
+  const grid = $('#archiveGrid');
+  const empty = $('#archiveEmpty');
+  const status = $('#archiveStatus');
+  if (!grid) return;
+
+  const list = state.articles || [];
+  empty.hidden = list.length > 0;
+
+  const q = (state.archiveQuery || '').trim().toLowerCase();
+  const shown = q
+    ? list.filter((a) =>
+        [a.date, a.title, a.titleZh, a.mode === 'exam' ? '真题' : '复习', a.mode]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      )
+    : list;
+
+  if (status) status.textContent = list.length === 1 ? '共 1 篇' : `共 ${list.length} 篇`;
+  if (!list.length) {
+    grid.innerHTML = '';
     return;
   }
-  box.innerHTML = state.dates
+  if (!shown.length) {
+    grid.innerHTML = `<p class="archive-noresult">没有找到「${esc(q)}」相关的文章。换个词试试，或者清空搜索框。</p>`;
+    return;
+  }
+
+  grid.innerHTML = shown
     .map(
-      (d) => `<button class="archive-item ${d === state.date ? 'active' : ''}" data-date="${d}">
-        <span class="t">${d === state.today ? `${d} · 今天` : d}</span>
-        <span class="d">${d === state.date ? '●' : ''}</span>
-      </button>`
+      (a, i) => `<article class="archive-card" data-date="${esc(a.date)}" data-accent="${i % 3}" tabindex="0" role="button">
+        <div class="card-spine">
+          <span>NO. ${String(i + 1).padStart(2, '0')}</span>
+          <span class="spine-mode">${a.mode === 'exam' ? '真题模式' : '复习模式'}</span>
+        </div>
+        <div class="card-body">
+          <p class="card-kicker">${esc(a.date)}${a.date === state.today ? ' · 今天' : ''}</p>
+          <h3 class="card-title">${esc(a.title || '（没有标题）')}</h3>
+          <p class="card-desc">${esc(a.titleZh || '—')}</p>
+          <div class="card-metrics">
+            <span><strong>${a.paragraphs || 0}</strong>段</span>
+            <span><strong>${a.wordCount || 0}</strong>词</span>
+          </div>
+        </div>
+        <div class="card-foot"><span>打开这篇</span><span aria-hidden="true">↗</span></div>
+      </article>`
     )
     .join('');
+}
+
+/** 导航横线跟着当前所在区块走（和剪藏台同一套做法） */
+function syncNav() {
+  const links = document.querySelectorAll('.page-nav [data-section]');
+  if (!links.length) return;
+  const header = document.querySelector('.site-header');
+  const line = (header ? header.getBoundingClientRect().height : 0) + 24;
+  let active = '';
+  document.querySelectorAll('[data-section]').forEach((el) => {
+    const section = document.getElementById(el.dataset.section);
+    if (section && section.getBoundingClientRect().top <= line) active = el.dataset.section;
+  });
+  // 滚到最底下时，最后一段离基准线还可能差一点，直接点亮它。
+  // 留 64px 余量：scrollIntoView 会因亚像素取整停在离底十几像素的位置。
+  const doc = document.documentElement;
+  if (window.scrollY + window.innerHeight >= doc.scrollHeight - 64) {
+    const last = document.querySelectorAll('.page-nav [data-section]');
+    if (last.length) active = last[last.length - 1].dataset.section;
+  }
+  // 停在首屏（hero）时还没有区块越线，默认点亮「今日文章」，别让导航一片灰
+  if (!active) active = 'today';
+  links.forEach((a) => {
+    if (a.dataset.section === active) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+}
+
+let navTicking = false;
+function watchNav() {
+  const onScroll = () => {
+    if (navTicking) return;
+    navTicking = true;
+    requestAnimationFrame(() => {
+      navTicking = false;
+      syncNav();
+    });
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  syncNav();
 }
 
 function renderMarks() {
   const box = $('#markList');
   const n = state.marks.length;
+  const mastered = state.marks.filter((m) => m.mastered).length;
   $('#markCount').textContent = n;
+  // 导航上的小数字只算「学习中」，已掌握的不再占注意力
+  const navCount = $('#navMarkCount');
+  if (navCount) navCount.textContent = String(n - mastered);
   $('#btnClearMarks').disabled = !n;
+  syncLedger();
   if (!n) {
     box.innerHTML =
-      '<p class="tip" style="margin:0">阅读时点任意单词就能查意思，点「☆ 收藏」收进这里。</p>';
+      '<p class="tip" style="margin:0">导入的单词会自动进这里；阅读时点任意单词、点「☆ 收藏」也能收。</p>';
     return;
   }
-  box.innerHTML = state.marks
+  // 侧栏只露出最近三个词；多出来的用一行「⋯」提示去生词本看
+  const ordered = state.marks
+    .slice()
+    .sort((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')));
+  const shown = ordered.slice(0, SIDEBAR_MARKS);
+  box.innerHTML = shown
     .map((m) => {
       // 一行一个词太挤，释义/搭配/考研义项全被省略号吃掉。改成多行卡片，内容全部展开。
       const subs = [
@@ -173,11 +292,12 @@ function renderMarks() {
         m.examSense ? `<div class="mk-sub"><i>考研常考</i>${esc(m.examSense)}</div>` : '',
         m.note ? `<div class="mk-sub mk-note">${esc(m.note)}</div>` : '',
       ].join('');
-      return `<div class="mark-chip" data-word="${esc(m.word)}">
+      return `<div class="mark-chip${m.mastered ? ' is-mastered' : ''}" data-word="${esc(m.word)}">
         <div class="mk-top">
           <span class="w">${esc(m.word)}</span>
           ${m.phonetic ? `<span class="ph">${esc(m.phonetic)}</span>` : ''}
           ${m.pos ? `<span class="pos">${esc(m.pos)}</span>` : ''}
+          ${m.mastered ? '<span class="mk-done" title="已掌握">✓</span>' : ''}
           <span class="rm" data-rm="${esc(m.word)}" title="移出生词本">✕</span>
         </div>
         ${m.cn ? `<div class="m">${esc(m.cn)}</div>` : ''}
@@ -185,6 +305,14 @@ function renderMarks() {
       </div>`;
     })
     .join('');
+  // 还有更多：只给一个提示，不铺满整个面板
+  const rest = ordered.length - shown.length;
+  if (rest > 0) {
+    box.insertAdjacentHTML(
+      'beforeend',
+      `<p class="mk-more" aria-label="还有 ${rest} 个生词"><span aria-hidden="true">⋯</span> 还有 ${rest} 个</p>`
+    );
+  }
 }
 
 // ------------------------------------------------------------------ 单词本
@@ -404,6 +532,10 @@ function renderArticle() {
   view.hidden = false;
 
   const glossaryMap = new Map(a.glossary.map((g) => [g.word.toLowerCase(), g]));
+  // 今天的靶子词永远用黄色（就算它已经在生词本里），蓝色只留给「收藏来的生词」
+  state.targetSet = new Set(
+    (a.glossary || []).map((g) => String(g.word || '').toLowerCase().replace(/\s+/g, ' '))
+  );
   const pattern = buildWordPattern(a.glossary, state.marks.map((m) => m.word));
 
   const usedCount = (a.usedWords || a.words || []).length;
@@ -533,7 +665,8 @@ function highlight(text, pattern) {
     // 生词本里的词用另一种样式，和今日目标词区分开。
     // 用 stem（不含词尾变化的部分）去比对，否则 take 收藏后 *takes* 不会变蓝
     const key = String(stem || m).toLowerCase().replace(/\s+/g, ' ');
-    const marked = state.marksSet.has(key);
+    const isTarget = state.targetSet && state.targetSet.has(key);
+    const marked = !isTarget && state.marksSet.has(key);
     return `<mark class="word${marked ? ' mine' : ''}" data-hw="${esc(m.replace(/\s+/g, ' '))}">${m}</mark>`;
   });
 }
@@ -1312,10 +1445,52 @@ function syncModeUI() {
     : '复习模式：把今天背的词尽量全用上，句子偏短、能靠语境猜词，重点是把词记住。';
 }
 
+/** 真题 / 复习 开关：点一下立刻切，顺手存进配置 */
+function syncModeSwitch() {
+  const mode = state.config?.prefs?.mode === 'exam' ? 'exam' : 'review';
+  $$('.mode-switch [data-mode]').forEach((btn) => {
+    const on = btn.dataset.mode === mode;
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+async function setMode(mode) {
+  if (!['exam', 'review'].includes(mode)) return;
+  if (state.config?.prefs?.mode === mode) return;
+  state.config = { ...(state.config || {}), prefs: { ...(state.config?.prefs || {}), mode } };
+  syncModeSwitch();
+  // 设置弹窗里的下拉、提示、真题用词数那行也跟着走
+  const cfgMode = $('#cfgMode');
+  if (cfgMode) {
+    cfgMode.value = mode;
+    syncModeUI();
+  }
+  try {
+    await api('/api/config', { method: 'POST', body: { prefs: { mode } } });
+    await load(state.date);
+    toast(mode === 'exam' ? '已切到真题模式' : '已切到复习模式');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // ------------------------------------------------------------------ 启动
 function bindTop() {
-  $('#datePicker').addEventListener('change', (e) => load(e.target.value));
+  $$('.mode-switch [data-mode]').forEach((btn) => {
+    btn.onclick = () => setMode(btn.dataset.mode);
+  });
   $('#btnImport').onclick = () => openModal($('#modalImport'));
+  // 首屏 Hero 上的两个大按钮：和顶栏、空态按钮走同一条路
+  const heroImport = $('#btnHeroImport');
+  if (heroImport) {
+    heroImport.onclick = () => {
+      openModal($('#modalImport'));
+      $('.tab[data-tab="image"]')?.click();
+    };
+  }
+  const heroGenerate = $('#btnHeroGenerate');
+  if (heroGenerate) heroGenerate.onclick = () => generate();
 
   // ---- 单词本 ----
   $('#btnVocab').onclick = () => openVocab('daily');
@@ -1363,21 +1538,6 @@ function bindTop() {
   $('#btnGenerate').onclick = generate;
 
   // 一键切模式：改完立刻存，但不会自动花你的额度重新生成
-  $('#modeQuick').addEventListener('change', async (e) => {
-    const mode = e.target.value === 'exam' ? 'exam' : 'review';
-    try {
-      const r = await api('/api/config', { method: 'POST', body: { prefs: { mode } } });
-      state.config = r.config;
-      const hasArticle = Boolean(state.article);
-      const label = mode === 'exam' ? '真题模式' : '复习模式';
-      toast(hasArticle ? `已切到${label} —— 点「重新生成」才会用新模式重写` : `已切到${label}`);
-      if (hasArticle && !confirm(`已切到${label}。\n\n要现在重新生成今天的文章吗？（会重新调用一次模型）`)) return;
-      if (hasArticle) await generate();
-    } catch (err) {
-      toast(err.message, true);
-      e.target.value = state.config?.prefs?.mode === 'exam' ? 'exam' : 'review';
-    }
-  });
   $('#btnClearWords').onclick = async () => {
     const n = state.words?.words?.length || 0;
     if (!n) return toast('今天还没有单词', true);
@@ -1394,10 +1554,35 @@ function bindTop() {
     fillSettings();
     openModal($('#modalSettings'));
   };
-  $('#archive').onclick = (e) => {
-    const item = e.target.closest('.archive-item');
-    if (item) load(item.dataset.date);
+  // 历史文章卡片：点一下（或按回车）打开那天那篇，然后把视线带回「今日文章」
+  const openFromCard = (card) => {
+    if (!card || !card.dataset.date) return;
+    load(card.dataset.date);
+    document.getElementById('today')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  $('#archiveGrid')?.addEventListener('click', (e) => openFromCard(e.target.closest('.archive-card')));
+  $('#archiveGrid')?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('.archive-card');
+    if (!card) return;
+    e.preventDefault();
+    openFromCard(card);
+  });
+  $('#archiveSearch')?.addEventListener('input', (e) => {
+    state.archiveQuery = e.target.value;
+    renderArchive();
+  });
+  $('#archiveEmptyBtn')?.addEventListener('click', () => {
+    document.getElementById('today')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  // 按 / 直接跳到历史文章搜索（和剪藏台一致）
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    e.preventDefault();
+    $('#archiveSearch')?.focus();
+  });
 
   // 下面这几块容器本身不会被重渲染，处理器只能绑一次，否则会叠加
   $('#articleView').addEventListener('click', onArticleClick);
@@ -1431,5 +1616,6 @@ function bindTop() {
 bindTop();
 bindModals();
 bindImageImport();
+watchNav();
 renderThumbs();
 load().catch((e) => toast(e.message, true));
