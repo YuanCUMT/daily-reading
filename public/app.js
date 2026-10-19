@@ -172,7 +172,10 @@ function renderArchive() {
 function renderMarks() {
   const box = $('#markList');
   const n = state.marks.length;
+  const mastered = state.marks.filter((m) => m.mastered).length;
   $('#markCount').textContent = n;
+  const summary = $('#markSummary');
+  if (summary) summary.textContent = `学习中 ${n - mastered} · 已掌握 ${mastered}`;
   $('#btnClearMarks').disabled = !n;
   syncLedger();
   if (!n) {
@@ -188,11 +191,12 @@ function renderMarks() {
         m.examSense ? `<div class="mk-sub"><i>考研常考</i>${esc(m.examSense)}</div>` : '',
         m.note ? `<div class="mk-sub mk-note">${esc(m.note)}</div>` : '',
       ].join('');
-      return `<div class="mark-chip" data-word="${esc(m.word)}">
+      return `<div class="mark-chip${m.mastered ? ' is-mastered' : ''}" data-word="${esc(m.word)}">
         <div class="mk-top">
           <span class="w">${esc(m.word)}</span>
           ${m.phonetic ? `<span class="ph">${esc(m.phonetic)}</span>` : ''}
           ${m.pos ? `<span class="pos">${esc(m.pos)}</span>` : ''}
+          ${m.mastered ? '<span class="mk-done" title="已掌握">✓</span>' : ''}
           <span class="rm" data-rm="${esc(m.word)}" title="移出生词本">✕</span>
         </div>
         ${m.cn ? `<div class="m">${esc(m.cn)}</div>` : ''}

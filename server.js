@@ -443,6 +443,17 @@ async function handleApi(req, res, url) {
     return ok(res, saved);
   }
 
+  if (p === '/api/marks/mastered' && req.method === 'POST') {
+    const body = await readBody(req);
+    const word = String(body.word || '').trim();
+    if (!word) return fail(res, '单词为空');
+    try {
+      return ok(res, store.setMarkMastered(word, !!body.mastered));
+    } catch (err) {
+      return fail(res, err.message || String(err), 400);
+    }
+  }
+
   if (p === '/api/marks' && req.method === 'DELETE') {
     if (url.searchParams.get('all') === '1') {
       return ok(res, store.saveMarks({ marks: [] }));

@@ -776,6 +776,148 @@ function seed() {
     fs.writeFileSync(SHOT, Buffer.from(shot.data, 'base64'));
     check('截图已保存', fs.existsSync(SHOT) && fs.statSync(SHOT).size > 10000, `${fs.statSync(SHOT).size} bytes`);
 
+    // ---------- 生词本独立页 ----------
+    // 先准备 3 个词：两个今天收藏、一个「已掌握」，用来验证分组与两摞的边界
+    const stamp = new Date().toISOString();
+    for (const w of [
+      { word: 'ledger', cn: '账簿', phonetic: '/ˈledʒə(r)/', pos: 'n.' },
+      { word: 'derelict', cn: '荒废的；被遗弃的', phonetic: '/ˈderəlɪkt/', pos: 'adj.' },
+    ]) {
+      await fetch(`${BASE}/api/marks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...w, articleDate: stamp.slice(0, 10) }),
+      });
+    }
+    await fetch(`${BASE}/api/marks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word: 'quaint', cn: '古怪而有趣的', phonetic: '/kweɪnt/', pos: 'adj.' }),
+    });
+    const masteredSeed = await (
+      await fetch(`${BASE}/api/marks/mastered`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: 'quaint', mastered: true }),
+      })
+    ).json();
+    check('接口能把词标成已掌握', !!masteredSeed.marks?.find((m) => m.word === 'quaint')?.mastered);
+
+    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
+    await waitFor(() => cdp.eval(`!!document.getElementById('learningList') && document.querySelectorAll('#learningList .mark-row').length > 0`).catch(() => false), {
+      label: '生词本页渲染',
+    });
+
+    // 期望值从接口算，别把断言写死成「正好 2 条」——这轮测试前面还收藏过别的词
+    const marksNow = await (await fetch(`${BASE}/api/marks`)).json();
+    const expectLearning = marksNow.marks.filter((m) => !m.mastered).length;
+    const expectMastered = marksNow.marks.filter((m) => m.mastered).length;
+    const expectDays = new Set(marksNow.marks.map((m) => String(m.addedAt || '').slice(0, 10))).size;
+
+    const page1 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        title: document.title,
+        learningRows: document.querySelectorAll('#learningList .mark-row').length,
+        learningCount: document.getElementById('countLearning').textContent,
+        masteredRows: document.querySelectorAll('#masteredList .mark-row').length,
+        masteredCount: document.getElementById('countMastered').textContent,
+        dayHeads: document.querySelectorAll('#learningList .day-head').length,
+        dayRules: document.querySelectorAll('#learningList .day-rule').length,
+        todayTags: document.querySelectorAll('#learningList .day-head .day-tag').length,
+        ruleWidth: (() => {
+          const r = document.querySelector('#learningList .day-rule');
+          if (!r) return '';
+          const cs = getComputedStyle(r);
+          return cs.borderTopWidth + ' ' + cs.borderTopStyle;
+        })(),
+        rulePx: Math.round(document.querySelector('#learningList .day-rule')?.getBoundingClientRect().width || 0),
+        rowPx: Math.round(document.querySelector('#learningList .mark-row')?.getBoundingClientRect().width || 0),
+        navCount: document.getElementById('navCount').textContent,
+        navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || '',
+        hasSummaryLink: !!document.querySelector('#markSummary')
+      })`)
+    );
+
+    check('生词本页标题正确', page1.title.includes('生词本'), page1.title);
+    check('生词本页把词分成两摞', page1.learningRows === expectLearning && page1.masteredRows === expectMastered, JSON.stringify(page1) + ` 期望 ${expectLearning}/${expectMastered}`);
+    check('两摞的计数与行数一致', page1.learningCount === String(expectLearning) && page1.masteredCount === String(expectMastered), JSON.stringify(page1));
+    check('按天分组（一天一组）', page1.dayHeads === expectDays, `${page1.dayHeads} 组 / 期望 ${expectDays}`);
+    check('每组都有一条分割横线', page1.dayRules === page1.dayHeads, JSON.stringify(page1));
+    check('横线是真的画出来的粗长线', page1.ruleWidth === '2px solid' && page1.rulePx >= page1.rowPx - 2, JSON.stringify(page1));
+    check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
+    check('导航上生词本高亮且带计数', page1.navCurrent.includes('生词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
+
+    // 再塞一个「昨天」收藏的词：接口只收前端字段，不认 addedAt，所以直接改数据文件造一天前
+    const marksFile = path.join(DATA, 'marks.json');
+    const marksDoc = JSON.parse(fs.readFileSync(marksFile, 'utf8'));
+    marksDoc.marks.push({
+      word: 'wee',
+      cn: '极小的',
+      pos: 'adj.',
+      addedAt: new Date(Date.now() - 86400000).toISOString(),
+    });
+    fs.writeFileSync(marksFile, JSON.stringify(marksDoc, null, 2));
+    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#learningList .day-head').length >= 2`).catch(() => false), {
+      label: '两天分成两组',
+    });
+    const page2 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        groups: document.querySelectorAll('#learningList .day-group').length,
+        rules: document.querySelectorAll('#learningList .day-rule').length,
+        labels: [...document.querySelectorAll('#learningList .day-head h4')].map(h => h.textContent.replace(/\\s+/g, ' ').trim())
+      })`)
+    );
+    check('两天的词分成两组', page2.groups === 2, JSON.stringify(page2));
+    check('两组各有一条长横线', page2.rules === 2, JSON.stringify(page2));
+    check('日期新的排在前面（19 号在 18 号前）', /19 日/.test(page2.labels[0]) && /18 日/.test(page2.labels[1]), JSON.stringify(page2.labels));
+
+    // 点「已掌握」：这个词应该从学习中挪到已掌握
+    await cdp.eval(`(() => {
+      const row = document.querySelector('#learningList .mark-row[data-word="ledger"]');
+      row.querySelector('[data-act="master"]').click();
+      return 'clicked';
+    })()`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#masteredList .mark-row[data-word="ledger"]').length === 1`), {
+      label: '标记已掌握后挪到另一摞',
+    });
+    const afterMaster = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        learning: document.querySelectorAll('#learningList .mark-row').length,
+        mastered: document.querySelectorAll('#masteredList .mark-row').length,
+        masterLabel: document.querySelector('#masteredList .mark-row[data-word="ledger"] [data-act="master"]')?.textContent
+      })`)
+    );
+    check('标成已掌握后从学习中消失', afterMaster.learning === expectLearning, JSON.stringify(afterMaster));
+    check('标成已掌握后出现在已掌握那摞', afterMaster.mastered === expectMastered + 1, JSON.stringify(afterMaster));
+    check('已掌握那行给的是「退回学习」', afterMaster.masterLabel === '退回学习', String(afterMaster.masterLabel));
+
+    // 再点回去
+    await cdp.eval(`document.querySelector('#masteredList .mark-row[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#learningList .mark-row[data-word="ledger"]').length === 1`), {
+      label: '退回学习',
+    });
+    check('能退回学习中', true);
+
+    // 空态文案：清空后两段都该给提示
+    const cleared = await (
+      await fetch(`${BASE}/api/marks?all=1`, { method: 'DELETE' })
+    ).json();
+    await cdp.send('Page.navigate', { url: `${BASE}/marks.html` });
+    await waitFor(() => cdp.eval(`!document.getElementById('learningEmpty').hidden`).catch(() => false), {
+      label: '空态提示',
+    });
+    const emptyUi = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        marks: document.querySelectorAll('.mark-row').length,
+        learningEmpty: !document.getElementById('learningEmpty').hidden,
+        masteredEmpty: !document.getElementById('masteredEmpty').hidden,
+        learningCount: document.getElementById('countLearning').textContent
+      })`)
+    );
+    check('生词本清空后没有行', emptyUi.marks === 0 && cleared.marks.length === 0, JSON.stringify(emptyUi));
+    check('两摞都显示空态提示', emptyUi.learningEmpty && emptyUi.masteredEmpty, JSON.stringify(emptyUi));
+
     ws.close();
   } catch (err) {
     failures.push(`异常：${err.message}`);
