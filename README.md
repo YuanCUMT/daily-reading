@@ -106,6 +106,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 所以截图只 OCR 出单词、没识别到释义也没关系 —— 生成过文章的词会自动补上；
 剩下没释义的（多半是当天没用上的词），在文章里点一下查过之后，单词本里也就有了。
 
+「我的生词」长这样：[docs/screenshot-vocab.png](docs/screenshot-vocab.png)。
+
 ## 两种文章模式
 
 顶栏日期右边有个下拉框，一键切换；也可以在设置里改。
