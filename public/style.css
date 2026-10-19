@@ -737,8 +737,8 @@ kbd {
   padding: 5px 14px; cursor: pointer; font-size: 13px; color: var(--ink);
 }
 .vtab.active { background: var(--ink); color: #fff; border-color: var(--ink); }
-/* 选中态是黑底，徽标要跟着反色，否则白字压在浅粉底上看不见 */
-.vtab.active .count { background: rgba(255, 255, 255, .22); color: #fff; }
+/* 选中态是黑底，徽标要跟着反色：用红色小方块，白字压上去才看得清 */
+.vtab.active .count { background: var(--red); color: #fff; }
 .vocab-tools { display: flex; gap: 8px; align-items: center; }
 .vocab-tools select, .vocab-tools input {
   padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px;
