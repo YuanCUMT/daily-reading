@@ -42,6 +42,8 @@ async function api(path, options = {}) {
 }
 
 let toastTimer;
+// 侧栏「我的生词」最多露几个词，其余去生词本页看
+const SIDEBAR_MARKS = 3;
 function toast(msg, isError = false) {
   const el = $('#toast');
   el.textContent = msg;
@@ -260,8 +262,6 @@ function renderMarks() {
   const n = state.marks.length;
   const mastered = state.marks.filter((m) => m.mastered).length;
   $('#markCount').textContent = n;
-  const summary = $('#markSummary');
-  if (summary) summary.textContent = `学习中 ${n - mastered} · 已掌握 ${mastered}`;
   // 导航上的小数字只算「学习中」，已掌握的不再占注意力
   const navCount = $('#navMarkCount');
   if (navCount) navCount.textContent = String(n - mastered);
@@ -272,7 +272,9 @@ function renderMarks() {
       '<p class="tip" style="margin:0">阅读时点任意单词就能查意思，点「☆ 收藏」收进这里。</p>';
     return;
   }
-  box.innerHTML = state.marks
+  // 侧栏只露出前三个词，剩下的去生词本页看（面板底下有「去生词本复习 →」）
+  const shown = state.marks.slice(0, SIDEBAR_MARKS);
+  box.innerHTML = shown
     .map((m) => {
       // 一行一个词太挤，释义/搭配/考研义项全被省略号吃掉。改成多行卡片，内容全部展开。
       const subs = [

@@ -62,7 +62,9 @@ main > section { width: var(--page); margin: 0 auto; }
   display: flex; align-items: center; justify-content: space-between;
   gap: 20px; flex-wrap: wrap; padding: 10px 0;
 }
-.brand { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 13px; min-width: 0; color: var(--ink); text-decoration: none; }
+.brand:visited { color: var(--ink); }
+.brand:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
 .brand-mark {
   flex: none;
   width: 43px; height: 43px;

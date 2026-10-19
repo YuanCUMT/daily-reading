@@ -522,29 +522,27 @@ function seed() {
     check('生词本里的释义不再被省略号截断', markLayout.wrapped && markLayout.notClipped, JSON.stringify(markLayout));
     check('侧栏与生词本都能滚动', markLayout.sideOverflow === 'auto' && markLayout.listOverflow === 'auto', JSON.stringify(markLayout));
 
-    // 塞满生词本，验证真的能滚到底（不是只有 overflow 属性写着 auto）
-    const scrollInfo = JSON.parse(
+    // 侧栏只露前三个词（其余去生词本页），塞 12 个进去验证不会撑长面板
+    const sidebarLimit = JSON.parse(
       await cdp.eval(`JSON.stringify((() => {
         window.__realMarks = state.marks.slice();
         state.marks = window.__realMarks.concat(Array.from({ length: 12 }, (_, i) => ({
           word: 'zzsample' + i,
-          cn: '很长的示例释义，用来把生词本撑高，看看滚轮能不能划到底 ' + i,
+          cn: '很长的示例释义 ' + i,
           pos: 'n.',
           collocation: 'sample sth'
         })));
         renderMarks();
-        const box = document.getElementById('markList');
-        const before = box.scrollTop;
-        box.scrollTop = box.scrollHeight;
-        const after = box.scrollTop;
         return {
-          overflows: box.scrollHeight > box.clientHeight + 2,
-          scrolled: after > before + 10,
-          count: document.querySelectorAll('#markList .mark-chip').length
+          chips: document.querySelectorAll('#markList .mark-chip').length,
+          total: state.marks.length,
+          count: document.getElementById('markCount').textContent,
+          first: document.querySelector('#markList .mark-chip .w')?.textContent
         };
       })())`)
     );
-    check('生词本变长后能滚到底', scrollInfo.overflows && scrollInfo.scrolled, JSON.stringify(scrollInfo));
+    check('侧栏只显示前三个生词', sidebarLimit.chips === 3, JSON.stringify(sidebarLimit));
+    check('面板标题上的计数仍是全部词数', sidebarLimit.count === String(sidebarLimit.total), JSON.stringify(sidebarLimit));
     await cdp.eval(`state.marks = window.__realMarks; renderMarks(); 'ok'`);
 
     // 非目标词本来只是纯文本，收藏之后正文里要立刻变成蓝色，不能等重新渲染
@@ -986,6 +984,7 @@ function seed() {
     check('横线是真的画出来的粗长线', page1.ruleWidth === '2px solid' && page1.rulePx >= page1.rowPx - 2, JSON.stringify(page1));
     check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
     check('导航上生词本高亮且带计数', page1.navCurrent.includes('生词本') && page1.navCount === String(expectLearning), JSON.stringify(page1));
+    check('主页侧栏不再显示「学习中 · 已掌握」那行小字', page1.hasSummaryLink === false, String(page1.hasSummaryLink));
 
     // 生词本页内的分区小导航：学习中 / 已掌握，粘在顶栏下面
     check('生词本有「学习中 / 已掌握」小导航',
