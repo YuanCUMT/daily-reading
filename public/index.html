@@ -5,71 +5,227 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>每日阅读 · 考研英语</title>
 <link rel="stylesheet" href="/style.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23d93625'/><text x='16' y='22' font-family='Helvetica,Arial' font-size='13' font-weight='bold' fill='%23fff' text-anchor='middle'>D/R</text></svg>" />
 </head>
-<body>
+<body class="page">
 <div class="app">
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">📖</span>
-      <div>
-        <h1>每日阅读</h1>
-        <p id="brandSub">用今天背的考研单词，读一篇真题风格的文章</p>
+
+  <header class="site-header">
+    <div class="nav-shell">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">D/R</span>
+        <span class="brand-word">
+          <h1>每日阅读</h1>
+          <p id="brandSub">今天背的词，读成一篇真题</p>
+        </span>
       </div>
-    </div>
-    <div class="topbar-actions">
-      <input type="date" id="datePicker" />
-      <select id="modeQuick" class="mode-quick" title="文章模式（切完点「生成文章」生效）">
-        <option value="review">复习模式</option>
-        <option value="exam">真题模式</option>
-      </select>
-      <button class="btn ghost" id="btnImport">导入单词</button>
-      <button class="btn primary" id="btnGenerate">生成文章</button>
-      <button class="btn icon" id="btnSettings" title="设置">⚙️</button>
+      <div class="topbar-actions">
+        <label class="field-inline">
+          <span class="field-label">日期</span>
+          <input type="date" id="datePicker" />
+        </label>
+        <label class="field-inline">
+          <span class="field-label">模式</span>
+          <select id="modeQuick" class="mode-quick" title="文章模式（切完点「生成文章」生效）">
+            <option value="review">复习模式</option>
+            <option value="exam">真题模式</option>
+          </select>
+        </label>
+        <button class="btn ghost" id="btnImport">导入单词</button>
+        <button class="btn primary" id="btnGenerate">生成文章 <span aria-hidden="true">↘</span></button>
+        <button class="btn ghost" id="btnSettings" title="设置">设置</button>
+      </div>
     </div>
   </header>
 
-  <div class="body">
-    <aside class="sidebar">
-      <section class="panel">
-        <h2>今日单词 <span class="count" id="wordCount">0</span>
-          <button class="mini-btn" id="btnClearWords" title="清空今天的单词">清空</button>
-        </h2>
-        <div id="wordList" class="word-list"></div>
-      </section>
-      <section class="panel">
-        <h2>历史文章</h2>
-        <div id="archive" class="archive"></div>
-      </section>
-      <section class="panel">
-        <h2>我的生词 <span class="count" id="markCount">0</span>
-          <button class="mini-btn" id="btnClearMarks" title="清空生词本">清空</button>
-        </h2>
-        <div id="markList" class="mark-list"></div>
-      </section>
-    </aside>
-
-    <main class="main" id="main">
-      <div class="empty" id="empty">
-        <h2>还没有今天的文章</h2>
-        <p>先把今天背的单词弄进来，再点「生成文章」。</p>
-        <div class="empty-actions">
-          <button class="btn primary" data-act="image">上传截图识别</button>
-          <button class="btn ghost" data-act="import">手动粘贴</button>
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="hero-intro"><span class="dot" aria-hidden="true"></span>本地运行 · 单词与文章不出这台电脑</p>
+        <h1>把今天背的词，<br />读成一篇真题。</h1>
+        <p class="hero-lede">截图里的单词经 Windows 自带 OCR 认出来，再由 DeepSeek 写成考研阅读原文的腔调：长难句、论证结构、五类理解题。数据只留在本机。</p>
+        <div class="hero-actions">
+          <button class="btn primary hero-button" id="btnHeroImport">导入今天的单词 <span aria-hidden="true">↘</span></button>
+          <button class="btn hero-secondary" id="btnHeroGenerate">直接生成文章 <span aria-hidden="true">↗</span></button>
         </div>
-        <p class="hint" id="emptyHint"></p>
+        <p class="hero-formats">截图 · 粘贴 — Windows OCR · DeepSeek — 复习 / 真题两种模式</p>
       </div>
-      <article id="articleView" hidden></article>
-    </main>
-  </div>
+
+      <figure class="hero-art" aria-label="从截图到精读的五步流程图">
+        <svg viewBox="0 0 560 520" role="img" aria-hidden="true">
+          <style>
+            .hw { font-family: "Avenir Next","Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif; }
+            .hw-title { font-size: 19px; font-weight: 800; fill: #20201e; letter-spacing: -.4px; }
+            .hw-cap { font-size: 13px; font-weight: 800; fill: #20201e; }
+            .hw-sub { font-size: 9.5px; fill: #65645e; letter-spacing: .2px; }
+            .hw-num { font-size: 11px; font-weight: 800; fill: #fff; }
+            .hw-line { stroke: #20201e; stroke-width: 2; fill: none; }
+            .hw-dash { stroke: #d93625; stroke-width: 1.5; stroke-dasharray: 4 4; fill: none; }
+          </style>
+
+          <rect x="1" y="1" width="558" height="518" fill="#faf9f5" stroke="#20201e" stroke-width="2" />
+          <text class="hw hw-title" x="22" y="38">words</text>
+          <line class="hw-line" x1="120" y1="31" x2="418" y2="31" marker-end="url(#arr)" />
+          <text class="hw hw-title" x="440" y="38">reading</text>
+          <line x1="1" y1="58" x2="559" y2="58" stroke="#20201e" stroke-width="2" />
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#20201e" />
+            </marker>
+          </defs>
+
+          <!-- 01 截图 -->
+          <rect x="24" y="82" width="150" height="130" fill="#f4f2eb" stroke="#20201e" stroke-width="1" />
+          <circle cx="99" cy="122" r="23" fill="#d93625" />
+          <rect x="88" y="113" width="22" height="17" fill="#faf9f5" />
+          <path d="M91 128 l6 -8 l5 7 l4 -5 l4 6 z" fill="#d93625" />
+          <text class="hw hw-cap" x="99" y="178" text-anchor="middle">01 截图</text>
+          <text class="hw hw-sub" x="99" y="196" text-anchor="middle">百词斩 / 单词表</text>
+
+          <!-- 02 OCR -->
+          <rect x="205" y="82" width="150" height="130" fill="#f4f2eb" stroke="#20201e" stroke-width="1" />
+          <rect x="261" y="100" width="38" height="46" fill="#234bc4" />
+          <path d="M285 100 l14 14 l-14 0 z" fill="#f4c434" />
+          <line x1="269" y1="116" x2="291" y2="116" stroke="#faf9f5" stroke-width="2" />
+          <line x1="269" y1="126" x2="291" y2="126" stroke="#faf9f5" stroke-width="2" />
+          <line x1="269" y1="136" x2="282" y2="136" stroke="#faf9f5" stroke-width="2" />
+          <text class="hw hw-cap" x="280" y="178" text-anchor="middle">02 识别</text>
+          <text class="hw hw-sub" x="280" y="196" text-anchor="middle">Windows OCR</text>
+
+          <!-- 03 选词 -->
+          <rect x="386" y="82" width="150" height="130" fill="#f4f2eb" stroke="#20201e" stroke-width="1" />
+          <rect x="440" y="100" width="42" height="42" fill="#f4c434" stroke="#20201e" stroke-width="1" />
+          <line x1="448" y1="113" x2="474" y2="113" stroke="#20201e" stroke-width="2" />
+          <line x1="448" y1="122" x2="474" y2="122" stroke="#20201e" stroke-width="2" />
+          <line x1="448" y1="131" x2="463" y2="131" stroke="#20201e" stroke-width="2" />
+          <text class="hw hw-cap" x="461" y="178" text-anchor="middle">03 选词</text>
+          <text class="hw hw-sub" x="461" y="196" text-anchor="middle">勾掉认错的</text>
+
+          <!-- 04 成文 -->
+          <rect x="386" y="246" width="150" height="130" fill="#f4f2eb" stroke="#20201e" stroke-width="1" />
+          <rect x="437" y="264" width="48" height="38" fill="#234bc4" />
+          <line x1="461" y1="264" x2="461" y2="302" stroke="#faf9f5" stroke-width="2" />
+          <text class="hw hw-cap" x="461" y="342" text-anchor="middle">04 成文</text>
+          <text class="hw hw-sub" x="461" y="360" text-anchor="middle">长难句 · 五大题型</text>
+
+          <!-- 05 精读 -->
+          <rect x="24" y="246" width="150" height="130" fill="#f4f2eb" stroke="#20201e" stroke-width="1" />
+          <path d="M84 264 h32 v40 h-32 z" fill="#faf9f5" stroke="#20201e" stroke-width="1" />
+          <line x1="92" y1="276" x2="108" y2="276" stroke="#20201e" stroke-width="2" />
+          <line x1="92" y1="284" x2="108" y2="284" stroke="#20201e" stroke-width="2" />
+          <line x1="92" y1="292" x2="101" y2="292" stroke="#20201e" stroke-width="2" />
+          <circle cx="112" cy="300" r="12" fill="#d93625" />
+          <path d="M106 300 l4 4 l7 -8" stroke="#faf9f5" stroke-width="3" fill="none" />
+          <text class="hw hw-cap" x="99" y="342" text-anchor="middle">05 精读</text>
+          <text class="hw hw-sub" x="99" y="360" text-anchor="middle">点词即查</text>
+
+          <!-- 箭头 -->
+          <line class="hw-line" x1="176" y1="147" x2="201" y2="147" marker-end="url(#arr)" />
+          <line class="hw-line" x1="357" y1="147" x2="382" y2="147" marker-end="url(#arr)" />
+          <line class="hw-line" x1="461" y1="214" x2="461" y2="243" marker-end="url(#arr)" />
+          <line class="hw-line" x1="384" y1="311" x2="178" y2="311" marker-end="url(#arr)" />
+          <text class="hw hw-sub" x="281" y="303" text-anchor="middle">每篇一份</text>
+
+          <!-- 虚线回路：读完还能回查 -->
+          <path class="hw-dash" d="M99 380 v26 h362 v-26" marker-end="url(#arrd)" />
+          <defs>
+            <marker id="arrd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#d93625" />
+            </marker>
+          </defs>
+          <text class="hw hw-sub" x="99" y="432" text-anchor="middle">读不懂就回查：点词出释义，收进生词本</text>
+
+          <text class="hw hw-sub" x="22" y="470">数据只留在这台电脑，模型只拿到你选中的那几十个词。</text>
+          <text class="hw hw-title" x="468" y="494" fill="#d93625">D/R</text>
+        </svg>
+      </figure>
+    </section>
+
+    <section class="ledger" aria-labelledby="ledger-title">
+      <div class="ledger-heading">
+        <h2 id="ledger-title">把今天的进度，<br />摆在明面上。</h2>
+        <span>数字随读写实时变</span>
+      </div>
+      <dl>
+        <div>
+          <dd id="ledgerWords">0</dd>
+          <dt>今日单词</dt>
+        </div>
+        <div>
+          <dd id="ledgerUsed">—</dd>
+          <dt>本篇用到</dt>
+        </div>
+        <div>
+          <dd id="ledgerMarks">0</dd>
+          <dt>生词本</dt>
+        </div>
+        <div>
+          <dd id="ledgerDays">0</dd>
+          <dt>历史文章</dt>
+        </div>
+      </dl>
+    </section>
+
+    <section class="workspace" id="work">
+      <aside class="sidebar">
+        <section class="panel">
+          <div class="panel-bar">
+            <span class="panel-code">01 / words</span>
+            <button class="mini-btn" id="btnClearWords" title="清空今天的单词">清空</button>
+          </div>
+          <h2>今日单词 <span class="count" id="wordCount">0</span></h2>
+          <div id="wordList" class="word-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-bar">
+            <span class="panel-code">02 / archive</span>
+          </div>
+          <h2>历史文章</h2>
+          <div id="archive" class="archive"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-bar">
+            <span class="panel-code">03 / marks</span>
+            <button class="mini-btn" id="btnClearMarks" title="清空生词本">清空</button>
+          </div>
+          <h2>我的生词 <span class="count" id="markCount">0</span></h2>
+          <div id="markList" class="mark-list"></div>
+        </section>
+      </aside>
+
+      <div class="main" id="main">
+        <div class="empty" id="empty">
+          <p class="empty-code">EMPTY / 还没有文章</p>
+          <h2>今天这篇，还没有开始。</h2>
+          <p>截图或粘贴都行——先弄到单词，再点「生成文章」。</p>
+          <div class="empty-actions">
+            <button class="btn primary" data-act="image">上传截图识别</button>
+            <button class="btn ghost" data-act="import">手动粘贴</button>
+          </div>
+          <p class="hint" id="emptyHint"></p>
+        </div>
+        <article id="articleView" hidden></article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p class="footer-brand">每日阅读 <span aria-hidden="true">● ▲ ■</span></p>
+    <p>单词与文章都存在本机 <code>data/</code>，只有选中的词会发给模型。</p>
+  </footer>
 </div>
 
 <!-- ============ 导入单词 ============ -->
 <div class="modal" id="modalImport" hidden>
   <div class="modal-card">
     <header>
-      <h3>导入今天的单词</h3>
-      <button class="btn icon" data-close>✕</button>
+      <div>
+        <p class="modal-code">import / 今日单词</p>
+        <h3>导入今天的单词</h3>
+      </div>
+      <button class="btn icon" data-close aria-label="关闭">✕</button>
     </header>
     <div class="modal-body">
       <div class="tabs">
@@ -79,7 +235,7 @@
 
       <div class="tab-panel" data-panel="image">
         <div id="dropzone" class="dropzone">
-          <div class="dz-icon">🖼️</div>
+          <div class="dz-icon">▣</div>
           <p class="dz-main">把百词斩的截图拖进来</p>
           <p class="dz-sub">也可以点这里选图片，或者直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴</p>
           <input type="file" id="fileInput" accept="image/*" multiple hidden />
@@ -113,8 +269,11 @@ reluctant</pre>
 <div class="modal" id="modalSettings" hidden>
   <div class="modal-card">
     <header>
-      <h3>设置</h3>
-      <button class="btn icon" data-close>✕</button>
+      <div>
+        <p class="modal-code">settings / 配置</p>
+        <h3>设置</h3>
+      </div>
+      <button class="btn icon" data-close aria-label="关闭">✕</button>
     </header>
     <div class="modal-body">
       <h4>DeepSeek 模型</h4>

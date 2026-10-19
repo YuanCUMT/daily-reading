@@ -402,6 +402,10 @@ function seed() {
     const clickedWord = await cdp.eval(`(() => {
       try { window.getSelection().removeAllRanges(); } catch {}
       const p = document.querySelector('.para[data-para="0"] .en');
+      // 新版页面首屏有 hero + 台账，正文可能落在窗口下沿之外；
+      // elementFromPoint / caretRangeFromPoint 只认视口内坐标，先滚到中间再取。
+      // 必须用 instant —— 页面开了 scroll-behavior: smooth，动画没走完时量到的还是旧坐标
+      p.scrollIntoView({ block: 'center', behavior: 'instant' });
       const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
       let node, hit = null;
       while ((node = walker.nextNode())) {

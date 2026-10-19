@@ -115,6 +115,24 @@ function renderAll() {
   $('#btnGenerate').disabled = !(state.words?.words?.length);
   const mode = state.config?.prefs?.mode === 'exam' ? 'exam' : 'review';
   if ($('#modeQuick').value !== mode) $('#modeQuick').value = mode;
+  syncLedger();
+}
+
+// 首屏那条「台账」：数字跟着读写实时变，没生成文章时「本篇用到」显示破折号
+function syncLedger() {
+  const set = (sel, value) => {
+    const el = $(sel);
+    if (el) el.textContent = String(value);
+  };
+  const words = state.words?.words?.length || 0;
+  const marks = state.marks?.length || 0;
+  const days = state.dates?.length || 0;
+  const a = state.article;
+  const used = a ? (a.usedWords || a.words || []).length : null;
+  set('#ledgerWords', words);
+  set('#ledgerUsed', used === null ? '—' : used);
+  set('#ledgerMarks', marks);
+  set('#ledgerDays', days);
 }
 
 function renderWords() {
@@ -156,6 +174,7 @@ function renderMarks() {
   const n = state.marks.length;
   $('#markCount').textContent = n;
   $('#btnClearMarks').disabled = !n;
+  syncLedger();
   if (!n) {
     box.innerHTML =
       '<p class="tip" style="margin:0">阅读时点任意单词就能查意思，点「☆ 收藏」收进这里。</p>';
@@ -1112,6 +1131,16 @@ function syncModeUI() {
 function bindTop() {
   $('#datePicker').addEventListener('change', (e) => load(e.target.value));
   $('#btnImport').onclick = () => openModal($('#modalImport'));
+  // 首屏 Hero 上的两个大按钮：和顶栏、空态按钮走同一条路
+  const heroImport = $('#btnHeroImport');
+  if (heroImport) {
+    heroImport.onclick = () => {
+      openModal($('#modalImport'));
+      $('.tab[data-tab="image"]')?.click();
+    };
+  }
+  const heroGenerate = $('#btnHeroGenerate');
+  if (heroGenerate) heroGenerate.onclick = () => generate();
   $('#empty')?.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
