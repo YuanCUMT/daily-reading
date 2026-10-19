@@ -245,8 +245,11 @@ function seed() {
       JSON.stringify(topbar.navItems));
     check('顶栏没有模式下拉', topbar.hasModeSelect === false);
     check('设置按钮在顶栏里', topbar.settingsInHeader === true);
-    check('顶栏只剩一个按钮（设置）', topbar.headerButtons.join(',') === 'btnSettings',
-      topbar.headerButtons.join(','));
+    check(
+      '顶栏按钮只有单词本和设置',
+      topbar.headerButtons.join(',') === 'btnVocab,btnSettings',
+      topbar.headerButtons.join(',')
+    );
 
     // 设置里改模式 → 存到服务端，文章头跟着变
     await cdp.eval(`document.getElementById('btnSettings').click(); 'ok'`);
@@ -525,9 +528,8 @@ function seed() {
     fs.writeFileSync(SHOT_LOOKUP, Buffer.from(shotLookup.data, 'base64'));
     check('划词浮层截图已保存', fs.existsSync(SHOT_LOOKUP) && fs.statSync(SHOT_LOOKUP).size > 10000);
 
-    // 导入的单词会自动进生词本，所以这里的数量都是「在原有基础上 +N」
     const marksBefore = Number(await cdp.eval(`state.marks.length`));
-    check('导入的单词已经自动进生词本', marksBefore > 0, String(marksBefore));
+    check('导入的单词不会自动进生词本', marksBefore === 0, String(marksBefore));
 
     await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
     await waitFor(() => cdp.eval(`state.marks.some((m) => m.word === 'paragraph')`), { label: '收藏入生词本' });
@@ -607,7 +609,7 @@ function seed() {
     check('收藏后正文立刻给这个词上高亮', wrapped.mine > 0 && wrapped.inPara === true, JSON.stringify(wrapped));
     check('变色的词就是刚才点的词', String(wrapped.hw).toLowerCase() === 'paragraph', wrapped.hw);
 
-    // 今日目标词因为「导入即入册」本来就在生词本里，点它不该再添一项
+    // 今日目标词默认不在生词本里，点开浮层只会查词、不会自动收词
     await cdp.eval(`document.querySelector('#articleView mark.word:not(.mine)').click(); 'ok'`);
     await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层' });
     const targetMark = JSON.parse(
@@ -619,8 +621,8 @@ function seed() {
           .filter((e) => state.targetSet.has(String(e.dataset.hw).toLowerCase())).length
       })`)
     );
-    check('今日目标词已经在生词本里', /已在生词本/.test(targetMark.btn), targetMark.btn);
-    check('目标词没有因为已经在册而多出一项', targetMark.total === marksBefore + 1, JSON.stringify(targetMark));
+    check('今日目标词默认不在生词本里', /☆ 收藏/.test(targetMark.btn), targetMark.btn);
+    check('点开浮层不会自动收词', targetMark.total === marksBefore + 1, JSON.stringify(targetMark));
     check('今日目标词仍是黄色，只有收藏来的生词变蓝', targetMark.mine > 0 && targetMark.targetBlue === 0, JSON.stringify(targetMark));
 
     // 从侧栏移除刚才那个非目标词：正文里要拆回纯文本，不能留下目标词的黄色样式
@@ -716,6 +718,25 @@ function seed() {
     check('之前框选的短语被整体标成生词', phraseMarked.inArticle >= 1, JSON.stringify(phraseMarked));
     check('短语收藏后按钮变为「已在生词本」', /已在生词本/.test(phraseMarked.btn), phraseMarked.btn);
 
+    // 短语要能在单词本里单独列出来，不然收藏了也没处看
+    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '打开单词本' });
+    await cdp.eval(`document.querySelector('#modalVocab [data-vtab="phrases"]').click(); 'ok'`);
+    await sleep(200);
+    const phraseTab = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        active: document.querySelector('#modalVocab [data-vtab="phrases"]').classList.contains('active'),
+        count: document.getElementById('vtabPhraseCount').textContent,
+        words: [...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent),
+        colloc: document.querySelector('#vocabBody .vcard .sub')?.textContent || ''
+      })`)
+    );
+    check('短语标签页单独列出短语', phraseTab.active === true && phraseTab.count === '1', JSON.stringify(phraseTab));
+    check('短语标签页里就是刚收藏的短语', JSON.stringify(phraseTab.words) === '["talk about"]', JSON.stringify(phraseTab.words));
+    check('短语卡片带搭配结构', phraseTab.colloc.includes('搭配'), phraseTab.colloc);
+    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
+    await sleep(200);
+
     // 清掉短语，别把它带进截图
     await cdp.eval(`document.querySelector('#markList [data-rm="talk about"]').click(); 'ok'`);
     await waitFor(
@@ -724,7 +745,124 @@ function seed() {
     );
     check('短语也能从侧栏移除', (await cdp.eval(`state.marks.some((m) => m.word === 'talk about')`)) === false);
 
-    // 选不合法的时候要说话，不能默默什么也不发生（这是用户报的「没反应」）
+    // ---- 单词本 ----
+    // 前面把收藏的词都清掉了，先正经收藏一个，单词本才有的可看
+    await cdp.eval(`document.querySelector('#articleView mark.word[data-hw="abandon"]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`!!document.querySelector('#popover [data-mark]')`), { label: '目标词浮层（收藏用）' });
+    await cdp.eval(`document.querySelector('#popover [data-mark]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`state.marks.length === 1`), { label: '收藏一个词用来检查单词本' });
+    await cdp.eval(`document.querySelector('#popover [data-close]')?.click(); 'ok'`);
+
+    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '打开单词本' });
+    const vocab1 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        tabs: document.querySelectorAll('#modalVocab [data-vtab]').length,
+  hasPhraseTab: !!document.querySelector('#modalVocab [data-vtab="phrases"]'),
+  phraseCount: document.getElementById('vtabPhraseCount')?.textContent,
+  fillVisible: (() => {
+    const b = document.getElementById('btnFillMeaning');
+    return !!b && !b.hidden;
+  })(),
+  fillLabel: document.getElementById('btnFillMeaning')?.textContent || '',
+        dailyActive: document.querySelector('#modalVocab [data-vtab="daily"]').classList.contains('active'),
+        dailyCount: document.getElementById('vtabDailyCount').textContent,
+        mineCount: document.getElementById('vtabMineCount').textContent,
+        cards: document.querySelectorAll('#vocabBody .vcard').length,
+        groups: document.querySelectorAll('#vocabBody .vgroup').length
+      })`)
+    );
+    check('单词本有两个标签页', vocab1.tabs === 3 && vocab1.dailyActive === true, JSON.stringify(vocab1));
+    check('单词本有单独的短语标签页', vocab1.hasPhraseTab === true && vocab1.phraseCount === '0', JSON.stringify(vocab1));
+    check('文章已补全释义时不给「补全释义」按钮', vocab1.fillVisible === false, JSON.stringify(vocab1));
+    check('单词本每日单词数正确', vocab1.dailyCount === '5', vocab1.dailyCount);
+    check('单词本生词数正确', vocab1.mineCount === '1', vocab1.mineCount);
+    check('单词本按天分组显示', vocab1.cards === 5 && vocab1.groups === 1, JSON.stringify(vocab1));
+
+    const defWords = JSON.parse(
+      await cdp.eval(`JSON.stringify([...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent))`)
+    );
+    const defSorted = defWords.slice().sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    check('时间排序时同一天内按字母排', JSON.stringify(defWords) === JSON.stringify(defSorted), defWords.join(','));
+
+    const setSort = (v) =>
+      cdp.eval(`(() => { const s = document.getElementById('vocabSort'); s.value = '${v}'; s.dispatchEvent(new Event('change')); return 'ok'; })()`);
+    await setSort('alpha');
+    const alpha = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        words: [...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent),
+        groups: document.querySelectorAll('#vocabBody .vgroup').length
+      })`)
+    );
+    const expected = alpha.words.slice().sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    check('按字母排序生效', JSON.stringify(alpha.words) === JSON.stringify(expected), alpha.words.join(','));
+    check('字母排序时不显示日期分组', alpha.groups === 0, String(alpha.groups));
+
+    await setSort('alpha-desc');
+    const desc = JSON.parse(await cdp.eval(`JSON.stringify([...document.querySelectorAll('#vocabBody .vcard .w')].map((e) => e.textContent))`));
+    check('字母倒序也能排', JSON.stringify(desc) === JSON.stringify(expected.slice().reverse()), desc.join(','));
+
+    await setSort('time-asc');
+    check('按时间旧→新也能排', (await cdp.eval(`document.querySelectorAll('#vocabBody .vgroup').length`)) === 1);
+
+    await cdp.eval(`(() => { const i = document.getElementById('vocabSearch'); i.value = 'aband'; i.dispatchEvent(new Event('input')); return 'ok'; })()`);
+    const found = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        n: document.querySelectorAll('#vocabBody .vcard').length,
+        w: document.querySelector('#vocabBody .vcard .w')?.textContent || ''
+      })`)
+    );
+    check('搜索能过滤单词', found.n === 1 && found.w === 'abandon', JSON.stringify(found));
+
+    await cdp.eval(`(() => { const i = document.getElementById('vocabSearch'); i.value = 'zzzz'; i.dispatchEvent(new Event('input')); return 'ok'; })()`);
+    check('搜不到时给提示', (await cdp.eval(`document.querySelector('#vocabBody .empty-tip')?.textContent || ''`)).includes('没有匹配'));
+
+    await cdp.eval(`document.querySelector('#modalVocab [data-vtab="mine"]').click(); 'ok'`);
+    const mineTab = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        active: document.querySelector('#modalVocab [data-vtab="mine"]').classList.contains('active'),
+        cards: document.querySelectorAll('#vocabBody .vcard').length,
+        word: document.querySelector('#vocabBody .vcard .w')?.textContent || '',
+        hasRemove: !!document.querySelector('#vocabBody [data-vrm]')
+      })`)
+    );
+    check('切到「我的生词」标签', mineTab.active === true && mineTab.cards === 1, JSON.stringify(mineTab));
+    check('生词卡片带移出按钮', mineTab.hasRemove === true && mineTab.word === 'abandon', JSON.stringify(mineTab));
+
+    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
+    check('单词本能关掉', (await cdp.eval(`document.getElementById('modalVocab').hidden`)) === true);
+
+    // 回归：单词本的标签页以前复用了 .tab 类名，会被导入弹窗那个全局处理器带歪
+    await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
+    await cdp.eval(`document.querySelector('#modalImport .tab[data-tab="paste"]').click(); 'ok'`);
+    check(
+      '导入弹窗的分页没被单词本影响',
+      (await cdp.eval(`document.querySelector('#modalImport [data-panel="paste"]').hidden`)) === false
+    );
+    await cdp.eval(`document.querySelector('#modalImport [data-close]').click(); 'ok'`);
+
+    // 「补全释义」按钮：词表里确实有没释义的词时才出现
+    const seedRes = await fetch(`${BASE}/api/words`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: '2026-07-01', words: [{ word: 'quokka' }, { word: 'numbat' }] }),
+    });
+    check('塞了两个没释义的词', seedRes.ok === true, String(seedRes.status));
+    await cdp.eval(`document.getElementById('btnVocab').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.getElementById('modalVocab')?.hidden === false`), { label: '再开单词本' });
+    await sleep(250);
+    const fillBtn = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        visible: !document.getElementById('btnFillMeaning').hidden,
+        label: document.getElementById('btnFillMeaning').textContent,
+        statusHidden: document.getElementById('vocabStatus').hidden
+      })`)
+    );
+    check('缺释义时出现「补全释义」按钮', fillBtn.visible === true && /补全释义（2）/.test(fillBtn.label), JSON.stringify(fillBtn));
+    check('补释义前不显示状态行', fillBtn.statusHidden === true, JSON.stringify(fillBtn));
+    await cdp.eval(`document.querySelector('#modalVocab [data-close]').click(); 'ok'`);
+    await fetch(`${BASE}/api/words?date=2026-07-01`, { method: 'DELETE' });
+    await sleep(200);
     await cdp.eval(`(() => {
       const p0 = document.querySelector('.para[data-para="0"] .en');
       const p1 = document.querySelector('.para[data-para="1"] .en');

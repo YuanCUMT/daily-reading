@@ -12,7 +12,7 @@ const { URL } = require('node:url');
 
 const store = require('./lib/store');
 const { runOcr, extractWords, saveDataUrl } = require('./lib/ocr');
-const { generateArticle, cleanOcrWords } = require('./lib/deepseek');
+const { generateArticle, cleanOcrWords, batchLookup } = require('./lib/deepseek');
 const { lookupWord } = require('./lib/dict');
 
 const PORT = Number(process.env.PORT || 8787);
@@ -178,6 +178,65 @@ function publicConfig(cfg) {
   };
 }
 
+/**
+ * 单词本的词表：按天分组，释义三级补全
+ *   1) 词表自己带的
+ *   2) 那天生成的文章里的 glossary（不额外花钱）
+ *   3) 查词缓存 data/dict/<word>.json
+ * OCR 只认得词、认不出释义，所以 2 和 3 经常是主要来源。
+ */
+function vocabDays() {
+  return store.listWordDays().map((d) => {
+    const article = store.loadArticle(d.date);
+    const gloss = new Map();
+    for (const g of article?.glossary || []) {
+      if (g?.word && g?.cn) gloss.set(String(g.word).toLowerCase(), g);
+    }
+    return {
+      date: d.date,
+      words: d.words.map((w) => {
+        const item = {
+          word: w.word,
+          meaning: w.meaning || '',
+          phonetic: w.phonetic || '',
+          pos: w.pos || '',
+        };
+        const g = gloss.get(String(w.word).toLowerCase());
+        if (!item.meaning && g) {
+          item.meaning = g.cn || '';
+          item.phonetic = item.phonetic || g.phonetic || '';
+          item.pos = item.pos || g.pos || '';
+        }
+        if (!item.meaning) {
+          const hit = store.loadDictEntry(w.word);
+          if (hit) {
+            item.meaning = hit.cn || '';
+            item.phonetic = item.phonetic || hit.phonetic || '';
+            item.pos = item.pos || hit.pos || '';
+          }
+        }
+        return item;
+      }),
+    };
+  });
+}
+
+/** 还缺释义的词（去重，保持出现顺序） */
+function missingMeanings(days) {
+  const seen = new Set();
+  const out = [];
+  for (const d of days) {
+    for (const w of d.words) {
+      if (w.meaning) continue;
+      const key = String(w.word).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(w.word);
+    }
+  }
+  return out;
+}
+
 async function handleApi(req, res, url) {
   const cfg = store.loadConfig();
   const p = url.pathname;
@@ -271,16 +330,14 @@ async function handleApi(req, res, url) {
     }
 
     const saved = store.saveWords(date, { source: body.source || '手动输入', words });
-    // 导入的单词一律进生词本（已有的只补空字段），所以「我的生词」= 攒下来的全部词
-    const marks = store.addMarks(
-      words.map((w) => ({ word: w.word, cn: w.meaning || '', phonetic: w.phonetic || '', pos: w.pos || '' }))
-    );
+    // 这里刻意不把导入的词自动塞进生词本：生词本 = 阅读时自己点 ☆ 收的词，
+    // 自动灌进去会让「我的生词」变成第二份词表，短语表也会被单词淹没。
     return ok(res, {
       words: saved,
       added,
       skipped,
       total: saved.words.length,
-      marksAdded: marks.added,
+      marksAdded: 0,
       mode: body.mode === 'replace' ? 'replace' : 'merge',
     });
   }
@@ -372,7 +429,6 @@ async function handleApi(req, res, url) {
     if (Array.isArray(body.words) && body.words.length) {
       words = body.words.map((w) => (typeof w === 'string' ? { word: w } : w));
       store.saveWords(date, { source: '临时输入', words });
-      store.addMarks(words.map((w) => ({ word: w.word, cn: w.meaning || '', phonetic: w.phonetic || '', pos: w.pos || '' })));
     }
     if (!words.length) return fail(res, '这一天还没有单词，先导入或粘贴单词');
 
@@ -434,6 +490,63 @@ async function handleApi(req, res, url) {
   // ---- 查词缓存 ----
   if (p === '/api/dict' && req.method === 'DELETE') {
     return ok(res, { dictCount: store.clearDict() });
+  }
+
+  // ---- 单词本（历史上所有天加的词，按天分组）----
+  if (p === '/api/vocab' && req.method === 'GET') {
+    const days = vocabDays();
+    const total = days.reduce((n, d) => n + d.words.length, 0);
+    return ok(res, {
+      days,
+      total,
+      marks: store.loadMarks().marks.length,
+      missing: missingMeanings(days).length,
+    });
+  }
+
+  // ---- 单词本：批量补释义 ----
+  // 一次请求只处理一批（默认 40 个），前端循环调用，这样能显示进度、也不至于撞上超时。
+  if (p === '/api/vocab/fill' && req.method === 'POST') {
+    if (!cfg.deepseek?.apiKey) {
+      return fail(res, '还没配置 API Key。补释义要调用模型，点右上角 ⚙️ 填一个。', 400);
+    }
+    const days = vocabDays();
+    const missing = missingMeanings(days);
+    if (!missing.length) return ok(res, { ok: true, filled: 0, remaining: 0, tried: 0 });
+
+    let limit = 40;
+    try {
+      const body = await readBody(req);
+      const n = Number(body?.limit);
+      if (Number.isFinite(n) && n > 0) limit = Math.min(Math.floor(n), 60);
+    } catch {
+      /* 没 body 就用默认值 */
+    }
+
+    const chunk = missing.slice(0, limit);
+    let filled = 0;
+    const errors = [];
+    try {
+      const entries = await batchLookup({ config: cfg, words: chunk });
+      for (const e of entries) {
+        if (!e.cn) continue;
+        store.saveDictEntry(e.word, {
+          word: e.word,
+          cn: e.cn,
+          phonetic: e.phonetic,
+          pos: e.pos,
+          examSense: e.examSense,
+          source: 'batch',
+        });
+        filled++;
+      }
+    } catch (err) {
+      errors.push(err.message || String(err));
+    }
+
+    const after = vocabDays();
+    const remaining = missingMeanings(after).length;
+    return ok(res, { ok: true, filled, remaining, tried: chunk.length, errors });
   }
 
   // ---- 生词本 ----

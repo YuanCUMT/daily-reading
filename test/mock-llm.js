@@ -37,6 +37,39 @@ const server = http.createServer((req, res) => {
     const user = parsed.messages?.find((m) => m.role === 'user')?.content || '';
     const isOcrFix = user.includes('OCR 出来的候选英文单词');
     const isLookup = /读者在文章中点了这(个词|个短语)/.test(user);
+    const isBatch = user.includes('请给出每个词的中文释义');
+
+    // 单词本批量补释义：按编号把词抄回来，每个都给一条假释义
+    if (isBatch) {
+      const listed = user
+        .split('\n')
+        .map((l) => l.match(/^\s*\d+\.\s*([A-Za-z][A-Za-z'\- ]*?)\s*$/))
+        .filter(Boolean)
+        .map((m) => m[1].trim());
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          model: parsed.model || 'mock',
+          usage: { prompt_tokens: 80, completion_tokens: 120 },
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  entries: listed.map((w) => ({
+                    word: w,
+                    phonetic: `/${w.toLowerCase().replace(/\s+/g, '_')}/`,
+                    pos: 'n.',
+                    cn: `${w} 的批量释义（测试）`,
+                    examSense: '',
+                  })),
+                }),
+              },
+            },
+          ],
+        })
+      );
+      return;
+    }
 
     // 划词查词：返回固定假释义；单词的 lemma 去掉常见后缀，用来验证前端显示的是原形。
     // 短语不做后缀剥离（in other words 不能被砍成 in other word）。
