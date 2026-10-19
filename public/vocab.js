@@ -472,9 +472,12 @@ $('#btnFillMeaning')?.addEventListener('click', () => fillMissingMeanings());
 
 /* ---------------- 启动 ---------------- */
 (async function boot() {
-  // 支持 /vocab.html?tab=mine 这样的直达
-  const want = new URLSearchParams(location.search).get('tab');
+  // 支持 /vocab.html?tab=mine&sort=alpha 这样的直达
+  const qs = new URLSearchParams(location.search);
+  const want = qs.get('tab');
   if (['daily', 'mine', 'phrases'].includes(want)) state.tab = want;
+  const wantSort = qs.get('sort');
+  if (['time-desc', 'time-asc', 'alpha', 'alpha-desc'].includes(wantSort)) state.sort = wantSort;
   try {
     await reload();
   } catch (e) {
