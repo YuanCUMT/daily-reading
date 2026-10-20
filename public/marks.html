@@ -30,7 +30,7 @@
     <section class="marks-head">
       <p class="eyebrow">Vocabulary book / 生词本</p>
       <h2>攒下来的词，<br />分成两摞。</h2>
-      <p class="marks-lede">阅读时点任意单词就能收藏，点「☆ 收藏」进这里。下面按收藏日期倒序排，一天一段，段与段之间一条长横线；背下来的点「已掌握」，随时还能拿回学习中。</p>
+      <p class="marks-lede">阅读时点任意单词就能收藏，点「☆ 收藏」进这里。下面按收藏日期倒序排，一天一段，段与段之间一条长横线；背下来的点「已掌握」，随时还能拿回学习中。想换个看法就切到「网状」，一个词一张卡片摊开看。</p>
       <dl class="marks-stats">
         <div>
           <dd id="statLearning">0</dd>
@@ -45,6 +45,17 @@
           <dt>收藏天数</dt>
         </div>
       </dl>
+
+      <div class="marks-tools">
+        <div class="view-switch" role="group" aria-label="显示方式">
+          <button type="button" data-view="list" aria-pressed="true">列表</button>
+          <button type="button" data-view="graph" aria-pressed="false">网状</button>
+        </div>
+        <div class="enrich-bar">
+          <p class="enrich-status" id="enrichStatus" role="status"></p>
+          <button class="btn tiny" id="btnEnrich" type="button" hidden>补全音标与例句</button>
+        </div>
+      </div>
     </section>
 
     <nav class="sub-nav" aria-label="生词本分区">
@@ -58,6 +69,7 @@
         <p>还没背下来的词。背下来就点这一行的「已掌握」。</p>
       </div>
       <div class="mark-groups" id="learningList"></div>
+      <div class="tile-wall" id="learningGrid" hidden></div>
       <p class="marks-empty" id="learningEmpty" hidden>还没有学习中的词。回到今天那页，阅读时点一下生词就能收藏。</p>
     </section>
 
@@ -67,6 +79,7 @@
         <p>按掌握日期排。想再背一遍，点「退回学习」。</p>
       </div>
       <div class="mark-groups" id="masteredList"></div>
+      <div class="tile-wall" id="masteredGrid" hidden></div>
       <p class="marks-empty" id="masteredEmpty" hidden>还没有标记为已掌握的词。背下来一个点一下，它就会挪到这里。</p>
     </section>
   </main>
@@ -76,6 +89,11 @@
     <p>生词存在本机 <code>data/marks.json</code>，不上传任何服务器。</p>
   </footer>
 </div>
+
+<aside class="word-card" id="wordCard" hidden aria-live="polite">
+  <button class="word-card-close" id="wordCardClose" type="button" aria-label="关闭">×</button>
+  <div class="word-card-body" id="wordCardBody"></div>
+</aside>
 
 <div class="toast" id="toast" hidden></div>
 <script src="/marks.js"></script>

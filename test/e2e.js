@@ -88,6 +88,19 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     check('页面里已经去掉了百词斩导入', !html.includes('百词斩抓取') && !html.includes('accessToken'));
     check('页面里有常驻的截图入口', html.includes('id="dropzone"') && html.includes('id="intake"'));
     check('导入区不再藏在弹窗里', !html.includes('modalImport') && !html.includes('上传截图识别'));
+
+    // 生词本页：列表 / 网状切换、词条卡片、补全入口
+    const marksPage = await fetch(`${BASE}/marks.html`);
+    const marksHtml = await marksPage.text();
+    const marksJs = await (await fetch(`${BASE}/marks.js`)).text();
+    check('生词本页可取', marksPage.status === 200 && marksHtml.includes('生词本'));
+    check(
+      '生词本有列表 / 网状两种视图',
+      marksHtml.includes('data-view="list"') && marksHtml.includes('data-view="graph"') && marksJs.includes('function tileHTML')
+    );
+    check('生词本有词条卡片容器', marksHtml.includes('id="wordCard"') && marksHtml.includes('id="wordCardBody"'));
+    check('生词本有补全入口', marksHtml.includes('id="btnEnrich"') && marksJs.includes('/api/marks/enrich'));
+    check('生词本文案没有乱码替换符', !marksHtml.includes('\uFFFD') && !marksJs.includes('\uFFFD'));
     const css = await fetch(`${BASE}/style.css`);
     check('样式表可取', css.status === 200 && (await css.text()).includes('.article-body'));
     const js = await fetch(`${BASE}/app.js`);

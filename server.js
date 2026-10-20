@@ -454,10 +454,72 @@ async function handleApi(req, res, url) {
       cn: String(body.cn || '').trim(),
       examSense: String(body.examSense || '').trim(),
       collocation: String(body.collocation || '').trim(),
+      example: String(body.example || '').trim(),
+      examples: Array.isArray(body.examples)
+        ? body.examples.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 3)
+        : [],
+      mnemonic: String(body.mnemonic || '').trim(),
       note: String(body.note || '').trim(),
       articleDate: body.articleDate ? store.normalizeDate(body.articleDate) : undefined,
     });
     return ok(res, saved);
+  }
+
+  /**
+   * 补全生词本词条：老数据只有音标和释义，记忆法、例句是后加的字段。
+   * 每次只处理几本词（模型一条要几秒），前端循环调用，查过的词走 dict 缓存不再花钱。
+   */
+  if (p === '/api/marks/enrich' && req.method === 'POST') {
+    const body = await readBody(req);
+    const want = (Array.isArray(body.words) ? body.words : []).map((w) => String(w || '').trim()).filter(Boolean);
+    const need = (m) =>
+      !m.phonetic || !m.cn || !m.mnemonic || !Array.isArray(m.examples) || m.examples.length === 0;
+    const targets = store
+      .loadMarks()
+      .marks.filter(need)
+      .filter((m) => (want.length ? want.includes(m.word) : true));
+    const limit = Math.min(Math.max(Number(body.limit) || 3, 1), 6);
+    let enriched = 0;
+    let failed = 0;
+    let needKey = false;
+    for (const m of targets.slice(0, limit)) {
+      try {
+        const cached = store.loadDictEntry(m.word);
+        const stale = !cached || !cached.mnemonic || !(cached.examples || []).length;
+        const { entry } = await lookupWord({ config: cfg, word: m.word, context: '', refresh: stale });
+        if (!entry.mnemonic && !(entry.examples || []).length) {
+          failed += 1; // 不是词、或模型没给出来：留着下次再试
+          continue;
+        }
+        store.addMark({
+          word: m.word,
+          phonetic: m.phonetic || entry.phonetic || '',
+          pos: m.pos || entry.pos || '',
+          cn: m.cn || entry.cn || '',
+          examSense: m.examSense || entry.examSense || '',
+          collocation: m.collocation || entry.collocation || '',
+          example: entry.example || m.example || '',
+          examples: (entry.examples || []).length ? entry.examples : m.examples || [],
+          mnemonic: m.mnemonic || entry.mnemonic || '',
+          note: m.note || entry.note || '',
+        });
+        enriched += 1;
+      } catch (e) {
+        if (e.code === 'NO_KEY') {
+          needKey = true;
+          break;
+        }
+        failed += 1;
+      }
+    }
+    const after = store.loadMarks().marks;
+    return ok(res, {
+      marks: after,
+      enriched,
+      failed,
+      needKey,
+      remaining: after.filter(need).length,
+    });
   }
 
   if (p === '/api/marks/mastered' && req.method === 'POST') {
