@@ -102,6 +102,8 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     check('start.cmd 用 CRLF 换行', !/(?<!\r)\n/.test(startCmd.toString('latin1')));
     const ocrPs1 = fs.readFileSync(path.join(ROOT, 'lib', 'ocr.ps1'));
     check('ocr.ps1 是纯 ASCII（PS 5.1 按 ANSI 读 .ps1）', !ocrPs1.some((b) => b > 127));
+    const splitPs1 = fs.readFileSync(path.join(ROOT, 'lib', 'split-images.ps1'));
+    check('split-images.ps1 是纯 ASCII（同 ocr.ps1）', !splitPs1.some((b) => b > 127));
     // install-shortcut.ps1 里有中文快捷方式名，必须带 UTF-8 BOM，否则 PS 5.1 会按 ANSI 解码成乱码
     const shortcutPs1 = fs.readFileSync(path.join(ROOT, 'tools', 'install-shortcut.ps1'));
     check(
@@ -241,6 +243,48 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
         // 这一步需要 key
       });
       check('未配置 Key 时跳过 AI 校正但仍能识别', fixed.data.ok === true && fixed.data.cleaned === false);
+
+      // 长图：Windows OCR 有 10000px 硬上限，程序要先切块、识别、再按坐标拼回一张
+      {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bcz-tall-'));
+        const tall = path.join(tmp, 'tall.png');
+        const mk = path.join(tmp, 'mk.ps1');
+        const psExe = process.env.SystemRoot
+          ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+          : 'powershell.exe';
+        fs.writeFileSync(
+          mk,
+          [
+            'Add-Type -AssemblyName System.Drawing',
+            '$img = New-Object System.Drawing.Bitmap(1080, 12000)',
+            '$g = [System.Drawing.Graphics]::FromImage($img)',
+            '$g.Clear([System.Drawing.Color]::White)',
+            '$f = New-Object System.Drawing.Font("Arial", 56)',
+            '$words = @("abandon","cautious","paralyze","journal","misalign","resilient","scrutiny","undermine","incentive","advocate","ambiguous","coherent")',
+            'for ($i = 0; $i -lt 40; $i++) { $g.DrawString($words[$i % 12], $f, [System.Drawing.Brushes]::Black, 60, (40 + $i * 290)) }',
+            '$g.Dispose()',
+            '$img.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)',
+            '$img.Dispose()',
+          ].join('\r\n')
+        );
+        const { spawnSync } = require('node:child_process');
+        const gen = spawnSync(psExe, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', mk, tall], {
+          encoding: 'utf8',
+          timeout: 120000,
+        });
+        if (!fs.existsSync(tall) || fs.statSync(tall).size < 1000) {
+          skip('超长截图自动切块', `生成测试图失败：${(gen.stderr || '').slice(0, 120)}`);
+        } else {
+          const shot = await json('/api/ocr', { method: 'POST', body: { images: [dataUrl(tall)], fix: false } });
+          const tw = (shot.data.words || []).map((w) => w.word.toLowerCase());
+          check('12000px 长图能识别（自动切块）', shot.data.ok === true, JSON.stringify(shot.data).slice(0, 200));
+          check('切块后 12 个词都在、没有重复', tw.length === 12, JSON.stringify(tw));
+          check('切块结果并回成一张图（perImage 只有 1 条）', (shot.data.perImage || []).length === 1, JSON.stringify(shot.data.perImage));
+          check('没有切片被跳过', (shot.data.failedImages || []).length === 0, JSON.stringify(shot.data.failedImages));
+          check('长图提示写的是 1 张图', /1 张图/.test(shot.data.hint || ''), shot.data.hint);
+        }
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
     }
 
     // ---- 4b. OCR 桥的向后兼容：旧版 Node 传 JSON 列表文件时，新脚本也必须能读 ----
@@ -275,6 +319,64 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
       } else {
         skip('旧版 JSON 列表兼容性', '找不到 powershell.exe');
       }
+    }
+
+    // ---- 4c. 长图切块的两个零件：头部尺寸解析、重叠行归并（纯函数，不跑 OCR）----
+    {
+      const { readImageSize, mergeSlices } = require(path.join(ROOT, 'lib', 'ocr.js'));
+
+      const png = Buffer.alloc(32);
+      png.writeUInt32BE(0x89504e47, 0); // \x89 P N G
+      png.writeUInt32BE(1080, 16);
+      png.writeUInt32BE(14000, 20);
+      const pngSize = readImageSize(png);
+      check('从 PNG 头读出宽高', pngSize?.width === 1080 && pngSize?.height === 14000, JSON.stringify(pngSize));
+
+      const gif = Buffer.alloc(16); // 真实 GIF 至少 13 字节；这里补到 16，和 readImageSize 的最小长度一致
+      gif.write('GIF89a', 0, 'latin1');
+      gif.writeUInt16LE(800, 6);
+      gif.writeUInt16LE(600, 8);
+      const gifSize = readImageSize(gif);
+      check('从 GIF 头读出宽高', gifSize?.width === 800 && gifSize?.height === 600, JSON.stringify(gifSize));
+
+      const jpg = Buffer.alloc(16);
+      jpg[0] = 0xff;
+      jpg[1] = 0xd8;
+      jpg[2] = 0xff;
+      jpg[3] = 0xc0;
+      jpg.writeUInt16BE(17, 4);
+      jpg[6] = 8;
+      jpg.writeUInt16BE(900, 7);
+      jpg.writeUInt16BE(1600, 9);
+      const jpgSize = readImageSize(jpg);
+      check('从 JPEG 的 SOF 段读出宽高', jpgSize?.width === 1600 && jpgSize?.height === 900, JSON.stringify(jpgSize));
+
+      const unit = {
+        orig: 'D:\\tmp\\long.png',
+        size: { width: 100, height: 200 },
+        slices: [{ file: 'a', x: 0, y: 0 }, { file: 'b', x: 0, y: 90 }],
+      };
+      const merged = mergeSlices(unit, [
+        { lines: [{ text: 'hello world', words: [{ t: 'hello', x: 0, y: 95, h: 20 }, { t: 'world', x: 60, y: 95, h: 20 }] }] },
+        {
+          lines: [
+            { text: 'hello world', words: [{ t: 'hello', x: 0, y: 5, h: 20 }, { t: 'world', x: 60, y: 5, h: 20 }] },
+            { text: 'second line', words: [{ t: 'second', x: 0, y: 60, h: 20 }] },
+          ],
+        },
+      ]);
+      check('重叠区的重复行被去掉', merged.lines.length === 2, JSON.stringify(merged.lines.map((l) => l.text)));
+      check('切片坐标换算回原图', merged.lines[1]?.words[0]?.y === 150, String(merged.lines[1]?.words[0]?.y));
+      check('归并后仍报告原图尺寸', merged.width === 100 && merged.height === 200);
+
+      const half = mergeSlices(unit, [
+        { lines: [{ text: 'hello world', words: [{ x: 0, y: 95, h: 20 }] }] },
+        { lines: [{ text: 'hello wor', words: [{ x: 0, y: 5, h: 20 }] }] },
+      ]);
+      check('被切断的半截行只留完整那条', half.lines.length === 1 && half.lines[0].text === 'hello world', JSON.stringify(half.lines.map((l) => l.text)));
+
+      const allBadSlices = mergeSlices(unit, [{ error: 'X' }, { error: 'Y' }]);
+      check('所有切片都失败时返回错误而不是空结果', allBadSlices.error === 'X', JSON.stringify(allBadSlices));
     }
 
     // ---- 5. 保存单词（关键：分多次导入要累加，不能互相覆盖） ----

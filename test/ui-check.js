@@ -1087,7 +1087,16 @@ function seed() {
     );
     check('两天的词分成两组', page2.groups === 2, JSON.stringify(page2));
     check('两组各有一条长横线', page2.rules === 2, JSON.stringify(page2));
-    check('日期新的排在前面（19 号在 18 号前）', /19 日/.test(page2.labels[0]) && /18 日/.test(page2.labels[1]), JSON.stringify(page2.labels));
+    // 日期文案跟着系统日期走，别把「19 号」写死：跑测试那天是哪天都不知道
+    const dayLabel = (n) => {
+      const t = new Date(Date.now() - n * 86400000);
+      return `${t.getMonth() + 1} 月 ${t.getDate()} 日`;
+    };
+    check(
+      '日期新的排在前面（今天在昨天前）',
+      page2.labels[0].includes(dayLabel(0)) && page2.labels[1].includes(dayLabel(1)),
+      JSON.stringify(page2.labels)
+    );
 
     // 点「已掌握」：这个词应该从学习中挪到已掌握
     await cdp.eval(`(() => {

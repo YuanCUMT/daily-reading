@@ -317,6 +317,7 @@ async function handleApi(req, res, url) {
       const describeError = (e) => {
         if (e === 'HEIC_NOT_SUPPORTED') return 'iPhone 的 HEIC 格式认不了，请先转成 JPG/PNG';
         if (e === 'FILE_NOT_FOUND') return '临时文件不见了';
+        if (e === 'TOO_LARGE') return '图太高或太宽（超过 10000 像素），自动切块没成功，请把它分成两张再传';
         return e;
       };
 

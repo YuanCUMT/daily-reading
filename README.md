@@ -151,6 +151,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-shortcut.ps1
 
 实测：一张单词卡只挑出那一个目标词；一张 6 个词的列表截图能全认出来；两种混着一次传，7 个词全在。
 
+**长截图不用手动裁。** Windows OCR 有个硬上限 `OcrEngine.MaxImageDimension = 10000`，宽或高超过就直接报
+`Image dimensions are too large!`。所以超限的图会先自动切成若干块（相邻两块重叠 240 px，避免把一行字从中间切断），
+分别识别后按坐标拼回一张：重叠区的重复行会被去掉，半截行只留完整的那条。实测 1080×30000 的长图
+（约 150 行）能认出全部词，耗时约 2 秒。只有切块本身失败（比如 WEBP 这类 `System.Drawing` 解不开的格式）时，
+才会提示「请分成两张再传」。
+
 坏图不会拖垮整批：能认的照常认，认不出的单独列出来；整批都失败会直接告诉你原因。
 
 识别完还会用 AI 校正一遍拼写、剔除界面噪声（可关掉）：
@@ -183,14 +189,15 @@ daily-reading/
 │  ├─ dict.js             划词查词：查缓存 → 调模型 → 写缓存（单词和短语同一套）
 │  ├─ prompt.js           考研向提示词 + 模型输出校验
 │  ├─ deepseek.js         DeepSeek（OpenAI 兼容）调用
-│  ├─ ocr.js              截图识别的 Node 封装 + 按字号挑词
-│  └─ ocr.ps1             调 Windows.Media.Ocr 的 PowerShell 脚本
+│  ├─ ocr.js              截图识别的 Node 封装 + 按字号挑词 + 长图切块归并
+│  ├─ ocr.ps1             调 Windows.Media.Ocr 的 PowerShell 脚本
+│  └─ split-images.ps1    超过 10000 像素的图切成重叠小块（System.Drawing）
 ├─ public/                前端（原生 HTML/CSS/JS，无需构建）
 │  ├─ index.html           首页：今日文章 + 历史文章两个区域
 │  ├─ marks.html           生词本页（学习中 / 已掌握，按天分组）
 │  ├─ app.js / marks.js    两个页面各自的逻辑
 │  └─ style.css            两个页面共用一套样式
-├─ test/                  测试（138 + 133 项，用本地假模型）
+├─ test/                  测试（152 + 147 项，用本地假模型）
 └─ data/                  运行时自动创建，全部是明文 JSON
    ├─ config.json         API Key、文章偏好
    ├─ marks.json          我的生词本
@@ -206,8 +213,8 @@ daily-reading/
 ## 测试
 
 ```bash
-node test/e2e.js        # 后端端到端（138 项）：真 OCR + 假模型 + 真 HTTP
-node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（133 项）并截图
+node test/e2e.js        # 后端端到端（152 项）：真 OCR + 假模型 + 真 HTTP
+node test/ui-check.js   # 真浏览器（Edge/Chrome + CDP）跑完整流程（147 项）并截图
 ```
 
 两个测试都用本地假模型，不消耗 token、不访问外网，也不会弹浏览器窗口。
