@@ -86,7 +86,8 @@ const dataUrl = (file) => `data:image/png;base64,${fs.readFileSync(file).toStrin
     check('首页返回 200', page.status === 200);
     check('首页是阅读器页面', html.includes('每日阅读'));
     check('页面里已经去掉了百词斩导入', !html.includes('百词斩抓取') && !html.includes('accessToken'));
-    check('页面里有截图识别入口', html.includes('上传截图识别') && html.includes('dropzone'));
+    check('页面里有常驻的截图入口', html.includes('id="dropzone"') && html.includes('id="intake"'));
+    check('导入区不再藏在弹窗里', !html.includes('modalImport') && !html.includes('上传截图识别'));
     const css = await fetch(`${BASE}/style.css`);
     check('样式表可取', css.status === 200 && (await css.text()).includes('.article-body'));
     const js = await fetch(`${BASE}/app.js`);

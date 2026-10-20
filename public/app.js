@@ -976,6 +976,7 @@ function renderThumbs() {
     )
     .join('');
   $('#btnDoOcr').disabled = state.images.length === 0;
+  if (!state.candidates.length && $('#btnSaveWords')) $('#btnSaveWords').disabled = true;
   box.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = () => {
       state.images.splice(Number(b.dataset.rm), 1);
@@ -993,14 +994,18 @@ function renderCandidates(box, candidates, hint, extraHtml = '') {
     <div class="cand-list">
       ${candidates
         .map(
-          (w, i) => `<label class="cand-item">
-            <input type="checkbox" name="cand" ${i < 30 ? 'checked' : ''} />
+          (w) => `<label class="cand-item">
+            <input type="checkbox" name="cand" checked />
             <input class="cand-word" value="${esc(w.word)}" spellcheck="false" />
           </label>`
         )
         .join('')}
     </div>
-    ${extraHtml}`;
+    <div class="ocr-foot">
+      ${extraHtml}
+      <button class="btn ghost" id="btnClearCands" title="丢掉这批识别结果，回到没识别过的状态">清除</button>
+      <button class="btn primary" id="btnSaveWords">保存勾选的词</button>
+    </div>`;
   $('#candAll').onclick = (e) => {
     e.preventDefault();
     $$('#ocrResult input[name="cand"]').forEach((el) => (el.checked = true));
@@ -1064,26 +1069,49 @@ function bindImageImport() {
     input.value = '';
   });
 
-  ['dragenter', 'dragover'].forEach((ev) =>
-    dz.addEventListener(ev, (e) => {
-      e.preventDefault();
-      dz.classList.add('over');
-    })
-  );
-  ['dragleave', 'drop'].forEach((ev) =>
-    dz.addEventListener(ev, (e) => {
-      e.preventDefault();
-      dz.classList.remove('over');
-    })
-  );
-  dz.addEventListener('drop', (e) => {
+  // 整页都能接图：不用先点开什么，拖进来就加到队列里
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  let dragDepth = 0;
+
+  document.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth += 1;
+    document.body.classList.add('dragging');
+  });
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
     e.preventDefault();
-    addImages([...(e.dataTransfer?.files || [])]);
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+  document.addEventListener('dragleave', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) document.body.classList.remove('dragging');
+  });
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove('dragging');
+    const files = [...(e.dataTransfer?.files || [])];
+    const images = files.filter((f) => /^image\//.test(f.type || ''));
+    if (!images.length) {
+      toast('这些文件不是图片，截图要用 PNG / JPG', true);
+      return;
+    }
+    addImages(images);
+    toast(`已加入 ${images.length} 张截图`);
+  });
+  // 拖到导入区外面也别让浏览器把图直接打开
+  window.addEventListener('dragover', (e) => {
+    if (hasFiles(e)) e.preventDefault();
+  });
+  window.addEventListener('drop', (e) => {
+    if (hasFiles(e)) e.preventDefault();
   });
 
-  // 直接 Ctrl+V 粘贴截图
+  // 直接 Ctrl+V 粘贴截图；粘贴文字时自动塞进右边的单词框
   document.addEventListener('paste', (e) => {
-    if ($('#modalImport').hidden) return;
     const files = [...(e.clipboardData?.items || [])]
       .filter((it) => it.kind === 'file' && /^image\//.test(it.type))
       .map((it) => it.getAsFile())
@@ -1092,8 +1120,36 @@ function bindImageImport() {
       e.preventDefault();
       addImages(files);
       toast(`已加入 ${files.length} 张截图`);
+      return;
     }
+    const text = e.clipboardData?.getData('text/plain') || '';
+    const el = document.activeElement;
+    const editing = el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable);
+    if (editing || !text.trim()) return;
+    const box = $('#pasteBox');
+    if (!box) return;
+    e.preventDefault();
+    box.value = box.value.trim() ? `${box.value.trim()}\n${text.trim()}` : text.trim();
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    focusIntake('paste');
+    toast('已粘贴到单词框，确认后点「保存到词表」');
   });
+}
+
+// 把视线带到常驻导入区（不再弹窗）
+function focusIntake(target = 'image') {
+  const sec = $('#intake');
+  if (!sec) return;
+  sec.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (target === 'paste') {
+    setTimeout(() => $('#pasteBox')?.focus(), 300);
+    return;
+  }
+  const panel = $('#intakeShots');
+  panel?.classList.remove('flash');
+  void panel?.offsetWidth;
+  panel?.classList.add('flash');
+  setTimeout(() => panel?.classList.remove('flash'), 900);
 }
 
 // ------------------------------------------------------------------ 弹窗事件
@@ -1131,39 +1187,52 @@ function bindModals() {
     });
   });
 
-  $$('.tab').forEach((t) =>
-    t.addEventListener('click', () => {
-      $$('.tab').forEach((x) => x.classList.toggle('active', x === t));
-      $$('.tab-panel').forEach((p) => (p.hidden = p.dataset.panel !== t.dataset.tab));
-    })
-  );
-
   $('#btnDoOcr').onclick = runOcr;
 
-  $('#btnSaveWords').onclick = async () => {
-    const activeTab = $('.tab.active')?.dataset.tab;
-    const status = $('#importStatus');
-    try {
-      let res;
-      if (activeTab === 'image') {
-        const picked = collectPickedCandidates();
-        if (!picked.length) return toast('先识别并勾选单词', true);
-        res = await api('/api/words', { method: 'POST', body: { date: state.date, words: picked, source: '截图识别' } });
-        resetImport();
-      } else {
-        if (!$('#pasteBox').value.trim()) return toast('粘贴框是空的', true);
-        res = await api('/api/words', { method: 'POST', body: { date: state.date, text: $('#pasteBox').value } });
-        $('#pasteBox').value = '';
-        $('#pastePreview').innerHTML = '';
-      }
+  const importStatus = $('#importStatus');
+  const reportSaved = async (res, keep) => {
+    // 导入区一直在，可以一批一批加，上一批的词不会被冲掉
+    importStatus.textContent = `已保存：新增 ${res.added} 个，跳过重复 ${res.skipped} 个，词表共 ${res.total} 个。${keep}`;
+    toast(`新增 ${res.added} 个，词表共 ${res.total} 个`);
+    await load(state.date);
+  };
 
-      // 弹窗保持打开，方便「一张一张加」——上一批的词不会再被冲掉
-      status.textContent = `已保存：新增 ${res.added} 个，跳过重复 ${res.skipped} 个，词表共 ${res.total} 个。可以继续添加。`;
-      toast(`新增 ${res.added} 个，词表共 ${res.total} 个`);
-      await load(state.date);
+  // 左栏：识别出来的候选词（按钮是渲染候选时才生成的，所以用事件委托）
+  $('#ocrResult').addEventListener('click', async (e) => {
+    if (e.target.closest('#btnClearCands')) {
+      resetImport();
+      importStatus.textContent = '已清除识别结果，可以重新拖图。';
+      toast('已清除');
+      return;
+    }
+    if (!e.target.closest('#btnSaveWords')) return;
+    const picked = collectPickedCandidates();
+    if (!picked.length) return toast('先识别并勾选单词', true);
+    try {
+      const res = await api('/api/words', {
+        method: 'POST',
+        body: { date: state.date, words: picked, source: '截图识别' },
+      });
+      resetImport();
+      await reportSaved(res, '可以继续拖图。');
+    } catch (err) {
+      toast(err.message, true);
+      importStatus.textContent = err.message;
+    }
+  });
+
+  // 右栏：手打的单词
+  $('#btnSavePaste').onclick = async () => {
+    const text = $('#pasteBox').value.trim();
+    if (!text) return toast('单词框是空的', true);
+    try {
+      const res = await api('/api/words', { method: 'POST', body: { date: state.date, text } });
+      $('#pasteBox').value = '';
+      $('#pastePreview').innerHTML = '';
+      await reportSaved(res, '可以接着敲。');
     } catch (e) {
       toast(e.message, true);
-      status.textContent = e.message;
+      importStatus.textContent = e.message;
     }
   };
 
@@ -1211,6 +1280,7 @@ function resetImport() {
   state.candidates = [];
   renderThumbs();
   $('#ocrResult').innerHTML = '';
+  if ($('#btnSaveWords')) $('#btnSaveWords').disabled = true;
 }
 
 function fillSettings() {
@@ -1275,24 +1345,11 @@ function bindTop() {
   $$('.mode-switch [data-mode]').forEach((btn) => {
     btn.onclick = () => setMode(btn.dataset.mode);
   });
-  $('#btnImport').onclick = () => openModal($('#modalImport'));
   // 首屏 Hero 上的两个大按钮：和顶栏、空态按钮走同一条路
   const heroImport = $('#btnHeroImport');
-  if (heroImport) {
-    heroImport.onclick = () => {
-      openModal($('#modalImport'));
-      $('.tab[data-tab="image"]')?.click();
-    };
-  }
+  if (heroImport) heroImport.onclick = () => focusIntake('image');
   const heroGenerate = $('#btnHeroGenerate');
   if (heroGenerate) heroGenerate.onclick = () => generate();
-  $('#empty')?.addEventListener('click', (e) => {
-    const act = e.target.closest('[data-act]')?.dataset.act;
-    if (!act) return;
-    openModal($('#modalImport'));
-    if (act === 'import') $('.tab[data-tab="paste"]').click();
-    else $('.tab[data-tab="image"]').click();
-  });
   $('#btnGenerate').onclick = generate;
 
   // 一键切模式：改完立刻存，但不会自动花你的额度重新生成

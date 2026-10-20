@@ -184,7 +184,7 @@ input[type="date"]:focus-visible, .mode-quick:focus-visible {
 /* ---------------------------------------------------------------- 工作区 */
 .workspace {
   display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 30px;
-  padding: 36px 0 60px; align-items: start;
+  padding: 22px 0 60px; align-items: start;
 }
 /* sticky 元素比视口高时，下半截会永远停在屏幕外、滚轮也带不下来。
    给侧栏一个自身上限 + 内部滚动，生词本再长也够得着。 */
@@ -207,6 +207,16 @@ input[type="date"]:focus-visible, .mode-quick:focus-visible {
 .word-list::-webkit-scrollbar-track, .archive::-webkit-scrollbar-track { background: transparent; }
 
 .main { min-width: 0; }
+/* 文章设置条：模式开关 + 生成按钮，紧贴文章区 */
+.main-tools {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 16px; padding-bottom: 12px; border-bottom: 1px solid var(--grid);
+}
+.main-tools-label {
+  margin-right: auto; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--muted);
+}
+.main-tools .btn { flex: none; }
 
 /* ---------------------------------------------------------------- 侧栏面板 */
 .panel { border: 1px solid var(--ink); background: var(--paper-white); }
@@ -325,7 +335,6 @@ input[type="date"]:focus-visible, .mode-quick:focus-visible {
 }
 .empty h2 { margin: 0 0 8px; font-size: 27px; font-weight: 800; letter-spacing: -.8px; }
 .empty p { margin: 0 auto 20px; font-size: 13px; color: var(--muted); max-width: 42ch; }
-.empty-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .empty .hint { font-size: 11.5px; margin: 18px 0 0; }
 
 /* ---------------------------------------------------------------- 文章 */
@@ -561,14 +570,37 @@ textarea { resize: vertical; font-family: var(--mono); font-size: 12.5px; line-h
   background: var(--paper-white); border: 1px solid var(--grid);
   font-family: var(--mono); font-size: 11.5px; color: var(--muted);
 }
-.tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid var(--ink); }
-.tab {
-  border: 1px solid var(--grid); border-bottom: 0; background: transparent;
-  padding: 7px 14px; cursor: pointer; font-size: 12px; font-weight: 650;
-  margin-right: -1px; color: var(--muted);
+/* ---------------------------------------------------------------- 常驻导入区 */
+.intake { margin: 14px 0 14px; }
+.intake-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 14px; align-items: start; }
+.intake-panel { display: flex; flex-direction: column; }
+.intake-body { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 12px; flex: 1 1 auto; }
+.intake-body .dropzone { padding: 22px 14px; }
+.intake-body textarea { width: 100%; min-height: 150px; max-height: 300px; flex: 0 0 auto; }
+.intake-body .row-inline { margin: 2px 0 0; }
+.paste-actions { justify-content: space-between; }
+.paste-actions .btn { flex: none; }
+/* 识别结果那一行：左边「原始识别文字」折叠条，右边保存按钮 */
+.ocr-foot { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.ocr-foot details.diag { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+.ocr-foot .btn { flex: none; }
+.ocr-foot #btnClearCands { margin-left: auto; }
+.intake-panel .panel-hint { font-size: 10px; letter-spacing: .3px; color: var(--muted); }
+.intake-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
+  flex-wrap: wrap; margin-top: 12px; min-height: 34px;
 }
-.tab:hover { background: var(--tint); color: var(--ink); }
-.tab.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.intake-foot #importStatus { margin-right: auto; font-size: 11.5px; color: var(--muted); }
+.intake-foot .btn { flex: none; }
+
+/* 拖到页面任意位置时，把落点高亮出来 */
+body.dragging .intake .dropzone { border-color: var(--red); background: #fdf2ef; }
+/* 点「导入单词」跳过来时，闪一下左栏 */
+@keyframes intake-flash {
+  from { box-shadow: 0 0 0 0 rgba(217, 54, 37, .45); }
+  to { box-shadow: 0 0 0 10px rgba(217, 54, 37, 0); }
+}
+.intake-panel.flash { animation: intake-flash .9s linear; }
 
 /* ---------------------------------------------------------------- 截图识别 */
 .dropzone {
@@ -750,8 +782,8 @@ kbd {
   .glossary { grid-template-columns: minmax(0, 1fr); }
   .modal { padding: 10px; }
   .modal-card { border-top-width: 6px; }
-  .tabs { flex-direction: column; border-bottom: 0; }
-  .tab { border-bottom: 1px solid var(--grid); margin-right: 0; margin-bottom: -1px; }
+  .intake-grid { grid-template-columns: minmax(0, 1fr); }
+  .intake-body textarea { min-height: 128px; }
   .site-footer { padding: 18px 0 26px; }
 }
 
@@ -936,7 +968,7 @@ kbd {
 .site-header .page-nav { margin-left: auto; }
 .site-header #btnSettings { flex: 0 0 auto; }
 
-.today { padding: 52px 0 8px; }
+.today { padding: 26px 0 4px; }
 .archive-section {
   padding: 44px 0 46px; margin-top: 44px;
   border-top: 2px solid var(--ink);
@@ -944,16 +976,17 @@ kbd {
 
 .section-heading {
   display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 40px; flex-wrap: wrap; margin-bottom: 24px;
+  gap: 40px; flex-wrap: wrap; margin-bottom: 10px;
 }
 .section-heading h2 { margin: 0; font-size: 30px; font-weight: 850; letter-spacing: -1.1px; }
+.section-heading h2 .h2-aside {
+  margin-left: 2px; font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--muted);
+}
+.section-heading .eyebrow { margin-bottom: 6px; }
 .section-heading > p {
-  margin: 0; max-width: 34ch; font-size: 11.5px; line-height: 1.85;
+  margin: 0; max-width: 44ch; font-size: 11.5px; line-height: 1.85;
   color: var(--muted); text-align: right;
 }
-
-.today-tools { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.today-tools .field-inline { min-width: 148px; }
 
 /* 真题 / 复习 开关：两段并排，选中的反白 */
 .mode-switch { display: inline-flex; border: 1px solid var(--ink); background: var(--paper); }

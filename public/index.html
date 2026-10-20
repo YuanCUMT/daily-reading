@@ -160,17 +160,54 @@
       <div class="section-heading">
         <div>
           <p class="eyebrow">Today / 今日 <span class="eyebrow-date" id="currentDate"></span></p>
-          <h2>今天这一篇</h2>
-        </div>
-        <div class="today-tools">
-          <div class="mode-switch" role="group" aria-label="文章模式">
-            <button type="button" data-mode="review">复习模式</button>
-            <button type="button" data-mode="exam">真题模式</button>
-          </div>
-          <button class="btn ghost" id="btnImport">导入单词</button>
-          <button class="btn primary" id="btnGenerate">生成文章 <span aria-hidden="true">↘</span></button>
+          <h2>今天这一篇<span class="h2-aside">：导入生词，阅读文章</span></h2>
         </div>
       </div>
+
+      <!-- 常驻导入区：不弹窗、不切换标签页，拖进来或直接敲字都在这里完事 -->
+      <section class="intake" id="intake" aria-label="导入单词">
+        <div class="intake-grid">
+          <div class="panel intake-panel" id="intakeShots">
+            <div class="panel-bar">
+              <span class="panel-code">01 / screenshots</span>
+              <span class="panel-hint">最多 12 张</span>
+            </div>
+            <div class="intake-body">
+              <div id="dropzone" class="dropzone">
+                <div class="dz-icon">▣</div>
+                <p class="dz-main">把百词斩的截图拖到这里</p>
+                <p class="dz-sub">整页都可以接；也可以点这里选图，或者 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴</p>
+                <input type="file" id="fileInput" accept="image/*" multiple hidden />
+              </div>
+              <div id="thumbs" class="thumbs"></div>
+              <div class="row-inline">
+                <button class="btn ghost" id="btnDoOcr" disabled>识别截图</button>
+                <label class="switch"><input type="checkbox" id="chkOcrFix" checked /> 用 AI 校正拼写、剔除界面文字</label>
+              </div>
+              <div id="ocrResult" class="fetch-result"></div>
+            </div>
+          </div>
+
+          <div class="panel intake-panel" id="intakeText">
+            <div class="panel-bar">
+              <span class="panel-code">02 / words</span>
+              <span class="panel-hint">一行一个，中英文都行</span>
+            </div>
+            <div class="intake-body">
+              <textarea id="pasteBox" rows="7" spellcheck="false" placeholder="abandon 放弃&#10;procedure /prəˈsiːdʒə/ n. 程序，步骤&#10;reluctant"></textarea>
+              <div id="pastePreview" class="paste-preview"></div>
+              <div class="row-inline paste-actions">
+                <span class="status">重复的词会自动跳过</span>
+                <button class="btn primary" id="btnSavePaste">保存到词表</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="intake-foot">
+          <p class="status" id="importStatus"></p>
+        </div>
+      </section>
 
       <div class="workspace" id="work">
         <aside class="sidebar">
@@ -195,14 +232,20 @@
         </aside>
 
         <div class="main" id="main">
+          <!-- 跟生成文章有关的设置，贴着文章区放 -->
+          <div class="main-tools">
+            <span class="main-tools-label">文章设置</span>
+            <div class="mode-switch" role="group" aria-label="文章模式">
+              <button type="button" data-mode="review">复习模式</button>
+              <button type="button" data-mode="exam">真题模式</button>
+            </div>
+            <button class="btn primary" id="btnGenerate">生成文章 <span aria-hidden="true">↘</span></button>
+          </div>
+
           <div class="empty" id="empty">
             <p class="empty-code">EMPTY / 还没有文章</p>
             <h2>今天这篇，还没有开始。</h2>
-            <p>截图或粘贴都行——先弄到单词，再点「生成文章」。</p>
-            <div class="empty-actions">
-              <button class="btn primary" data-act="image">上传截图识别</button>
-              <button class="btn ghost" data-act="import">手动粘贴</button>
-            </div>
+            <p>上面那块导入区一直开着——截图拖进去或直接敲单词，搞定后点「生成文章」。</p>
             <p class="hint" id="emptyHint"></p>
           </div>
           <article id="articleView" hidden></article>
@@ -244,54 +287,6 @@
     <p class="footer-brand">每日阅读 <span aria-hidden="true">● ▲ ■</span></p>
     <p>单词与文章都存在本机 <code>data/</code>，只有选中的词会发给模型。</p>
   </footer>
-</div>
-
-<!-- ============ 导入单词 ============ -->
-<div class="modal" id="modalImport" hidden>
-  <div class="modal-card">
-    <header>
-      <div>
-        <p class="modal-code">import / 今日单词</p>
-        <h3>导入今天的单词</h3>
-      </div>
-      <button class="btn icon" data-close aria-label="关闭">✕</button>
-    </header>
-    <div class="modal-body">
-      <div class="tabs">
-        <button class="tab active" data-tab="image">上传截图识别</button>
-        <button class="tab" data-tab="paste">手动粘贴</button>
-      </div>
-
-      <div class="tab-panel" data-panel="image">
-        <div id="dropzone" class="dropzone">
-          <div class="dz-icon">▣</div>
-          <p class="dz-main">把百词斩的截图拖进来</p>
-          <p class="dz-sub">也可以点这里选图片，或者直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴</p>
-          <input type="file" id="fileInput" accept="image/*" multiple hidden />
-        </div>
-        <div id="thumbs" class="thumbs"></div>
-        <div class="row-inline">
-          <button class="btn primary" id="btnDoOcr" disabled>开始识别</button>
-          <label class="switch"><input type="checkbox" id="chkOcrFix" /> 用 AI 校正拼写、剔除界面文字</label>
-        </div>
-        <div id="ocrResult" class="fetch-result"></div>
-      </div>
-
-      <div class="tab-panel" data-panel="paste" hidden>
-        <p class="tip">一行一个，中英文都行：</p>
-        <pre class="example">abandon 放弃
-procedure /prəˈsiːdʒə/ n. 程序，步骤
-reluctant</pre>
-        <textarea id="pasteBox" rows="8" placeholder="在这里粘贴单词……"></textarea>
-        <div id="pastePreview" class="paste-preview"></div>
-      </div>
-    </div>
-    <footer>
-      <span class="status" id="importStatus"></span>
-      <button class="btn ghost" data-close>取消</button>
-      <button class="btn primary" id="btnSaveWords">保存</button>
-    </footer>
-  </div>
 </div>
 
 <!-- ============ 设置 ============ -->

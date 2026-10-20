@@ -92,8 +92,8 @@ class CDP {
   }
 }
 
-/** 在页面里把若干张本地 PNG 伪造成拖拽进来的文件 */
-function dropFixtureExpr(files) {
+/** 在页面里把若干张本地 PNG 伪造成拖拽进来的文件（默认投在投递框上，可改投到别处） */
+function dropFixtureExpr(files, target = '#dropzone') {
   const list = Array.isArray(files) ? files : [files];
   const payload = list.map((f) => ({
     name: f,
@@ -107,7 +107,7 @@ function dropFixtureExpr(files) {
       for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
       dt.items.add(new File([arr], item.name, { type: 'image/png' }));
     }
-    document.getElementById('dropzone').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    document.querySelector('${target}').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
     return 'dropped';
   })()`;
 }
@@ -226,7 +226,7 @@ function seed() {
     check('空态可见', initial.emptyVisible === true);
     check('页面标题是考研版', initial.title.includes('考研'), initial.title);
     check('界面上已经没有百词斩导入', initial.hasBaicizhan === false);
-    check('空态首选「上传截图识别」', initial.emptyButtons[0].includes('截图'), JSON.stringify(initial.emptyButtons));
+    check('空态不再放「去上面选截图 / 敲单词」按钮', initial.emptyButtons.length === 0, JSON.stringify(initial.emptyButtons));
     check('弹窗默认关闭', initial.modalsHidden === true);
     check('没有 JS 报错', cdp.consoleErrors.length === 0 && cdp.pageErrors.length === 0, JSON.stringify([...cdp.consoleErrors, ...cdp.pageErrors]));
 
@@ -310,18 +310,27 @@ function seed() {
     check('从设置里改回复习模式', true);
     await cdp.eval(`document.querySelector('#modalSettings [data-close]').click(); 'ok'`);
 
-    // ---------- 今日文章区头的模式开关 ----------
+    // ---------- 文章设置条：模式开关 + 生成按钮，贴着文章区 ----------
     const modeBar = JSON.parse(
       await cdp.eval(`JSON.stringify({
         labels: [...document.querySelectorAll('.mode-switch [data-mode]')].map((b) => b.textContent.trim()),
         on: [...document.querySelectorAll('.mode-switch [data-mode]')]
           .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset.mode),
-        inTools: !!document.querySelector('.today-tools .mode-switch'),
+        inMainTools: !!document.querySelector('#main .main-tools .mode-switch'),
+        generateInMainTools: !!document.querySelector('#main .main-tools #btnGenerate'),
+        generateNearEmpty: (() => {
+          const b = document.getElementById('btnGenerate');
+          const e = document.getElementById('empty');
+          if (!b || !e) return false;
+          return b.getBoundingClientRect().bottom <= e.getBoundingClientRect().top + 1;
+        })(),
         hasDatePicker: !!document.getElementById('datePicker')
       })`)
     );
-    check('今日文章区头有两个模式按钮', modeBar.labels.join('/') === '复习模式/真题模式', JSON.stringify(modeBar));
-    check('模式开关在「今日文章」的工具条里', modeBar.inTools === true, JSON.stringify(modeBar));
+    check('文章设置条有两个模式按钮', modeBar.labels.join('/') === '复习模式/真题模式', JSON.stringify(modeBar));
+    check('模式开关挪到了文章区上方', modeBar.inMainTools === true, JSON.stringify(modeBar));
+    check('生成文章按钮也在文章区上方', modeBar.generateInMainTools === true, JSON.stringify(modeBar));
+    check('生成按钮就在空态上方', modeBar.generateNearEmpty === true, JSON.stringify(modeBar));
     check('日期选择器已经换成模式开关', modeBar.hasDatePicker === false, JSON.stringify(modeBar));
     check('当前亮着的是复习模式', modeBar.on.join() === 'review', JSON.stringify(modeBar));
 
@@ -349,17 +358,29 @@ function seed() {
     await waitFor(() => cdp.eval(`(state.config || {}).prefs?.mode === 'review'`), { label: '前端拿到复习模式' });
     check('再点一下切回复习模式', (await cdp.eval(`document.querySelector('.mode-switch [data-mode="review"]').getAttribute('aria-pressed')`)) === 'true');
 
-    // ---------- 截图识别 ----------
-    await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
-    await sleep(200);
-    const tabs = JSON.parse(
+    // ---------- 常驻导入区（不再弹窗） ----------
+    check('区头不再有「导入单词」按钮', (await cdp.eval(`document.getElementById('btnImport')`)) === null);
+    await cdp.eval(`document.getElementById('intake').scrollIntoView({ block: 'center' }); 'ok'`);
+    await sleep(600);
+    const intake = JSON.parse(
       await cdp.eval(`JSON.stringify({
-        active: document.querySelector('.tab.active').dataset.tab,
-        labels: [...document.querySelectorAll('.tab')].map(t => t.textContent.trim())
+        noModal: document.getElementById('modalImport') === null,
+        visible: (() => {
+          const r = document.getElementById('intake').getBoundingClientRect();
+          return r.top < innerHeight && r.bottom > 0;
+        })(),
+        tabs: document.querySelectorAll('.tab').length,
+        textareaVisible: (() => {
+          const t = document.getElementById('pasteBox');
+          return !!t && t.offsetParent !== null;
+        })(),
+        dropVisible: !!document.getElementById('dropzone') && document.getElementById('dropzone').offsetParent !== null
       })`)
     );
-    check('导入弹窗默认停在「上传截图识别」', tabs.active === 'image', JSON.stringify(tabs));
-    check('只剩两个入口：截图 / 粘贴', tabs.labels.length === 2, JSON.stringify(tabs.labels));
+    check('导入区直接长在页面上，没有弹窗', intake.noModal === true);
+    check('截图区和单词框同时可见，不用切标签', intake.dropVisible && intake.textareaVisible, JSON.stringify(intake));
+    check('没有残留的标签页切换', intake.tabs === 0);
+    check('导入区就在页面上，滚过去就能用', intake.visible === true);
 
     check('识别按钮初始禁用', (await cdp.eval(`document.getElementById('btnDoOcr').disabled`)) === true);
 
@@ -381,13 +402,28 @@ function seed() {
     check('没有报错提示', (await cdp.eval(`!document.querySelector('#ocrResult .tip[style*="b13b25"]')`)) === true);
 
     check('候选词是可编辑的输入框', multi.length === (await cdp.eval(`document.querySelectorAll('#ocrResult .cand-word').length`)));
+    check(
+      '识别出来的词默认全部勾选',
+      (await cdp.eval(
+        `(() => { const all = document.querySelectorAll('#ocrResult input[name="cand"]'); return all.length === 7 && [...all].every(c => c.checked); })()`
+      )) === true
+    );
+    check(
+      '保存按钮在识别结果框里、和原始识别文字同一行',
+      (await cdp.eval(
+        `(() => { const b = document.querySelector('#ocrResult #btnSaveWords'); if (!b) return false;
+           const d = document.querySelector('#ocrResult details.diag'); if (!d) return false;
+           const rb = b.getBoundingClientRect(), rd = d.getBoundingClientRect();
+           return b.closest('.ocr-foot') === d.parentElement && rb.right > rd.right - 2 && rb.bottom > rd.top && rb.top < rd.bottom; })()`
+      )) === true
+    );
 
     await cdp.eval(`document.getElementById('btnSaveWords').click(); 'ok'`);
     await waitFor(() => cdp.eval(`document.querySelectorAll('.word-chip').length === 7`), { label: '7 个词进侧栏' });
     check('多图识别的结果一次保存成功', (await sidebarWords(cdp)).length === 7);
-    check('保存后弹窗保持打开，方便继续加', (await cdp.eval(`document.getElementById('modalImport').hidden`)) === false);
+    check('保存后导入区仍在页面上，方便继续加', (await cdp.eval(`!!document.getElementById('intake') && !document.getElementById('intake').hidden`)) === true);
     check(
-      '弹窗底部提示了这次新增了几个',
+      '导入区底部提示了这次新增了几个',
       /新增 7 个/.test(await cdp.eval(`document.getElementById('importStatus').textContent`)),
       await cdp.eval(`document.getElementById('importStatus').textContent`)
     );
@@ -408,7 +444,39 @@ function seed() {
     const status = await cdp.eval(`document.getElementById('importStatus').textContent`);
     check('第二批全部是重复词，被跳过而不是覆盖', /新增 0 个，跳过重复 1 个，词表共 7 个/.test(status), status);
     check('第一批的 7 个词一个都没少', (await sidebarWords(cdp)).length === 7, JSON.stringify(await sidebarWords(cdp)));
-    await cdp.eval(`document.querySelector('#modalImport [data-close]').click(); 'ok'`);
+
+    // ---------- 拖到页面别处也接得住（不用先点开导入区） ----------
+    await cdp.eval(dropFixtureExpr('word-card.png', 'body'));
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#thumbs .thumb').length === 1`), { label: '整页拖入' });
+    check('拖到页面任意位置也会进队列', true);
+    await cdp.eval(`document.querySelector('#thumbs [data-rm]').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#thumbs .thumb').length === 0`), { label: '移除缩略图' });
+
+    // ---------- 「清除」：丢掉这批识别结果，回到没识别过的状态 ----------
+    await cdp.eval(dropFixtureExpr('word-list.png'));
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#thumbs .thumb').length === 1`), { label: '清除用的缩略图' });
+    await cdp.eval(`document.getElementById('btnDoOcr').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#ocrResult .cand-item').length >= 1`), {
+      tries: 120,
+      label: '清除用的识别结果',
+    });
+    check(
+      '「清除」在「保存勾选的词」左边',
+      (await cdp.eval(
+        `(() => { const a = document.getElementById('btnClearCands'), b = document.getElementById('btnSaveWords');
+           return !!a && !!b && a.getBoundingClientRect().right <= b.getBoundingClientRect().left; })()`
+      )) === true
+    );
+    await cdp.eval(`document.getElementById('btnClearCands').click(); 'ok'`);
+    await waitFor(() => cdp.eval(`document.querySelectorAll('#ocrResult .cand-item').length === 0`), {
+      label: '清除后候选清空',
+    });
+    check('「清除」把缩略图和候选一起清掉', (await cdp.eval(`document.querySelectorAll('#thumbs .thumb').length`)) === 0);
+    check('「清除」后回到没选图的初始状态', (await cdp.eval(`document.getElementById('btnDoOcr').disabled`)) === true);
+    check(
+      '「清除」后识别区是空的',
+      (await cdp.eval(`document.getElementById('ocrResult').innerHTML.trim()`)) === ''
+    );
 
     // ---------- 清空 ----------
     cdp.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => {});
@@ -417,10 +485,10 @@ function seed() {
     await waitFor(() => cdp.eval(`document.querySelectorAll('.word-chip').length === 0`), { label: '清空单词' });
     check('「清空」能清掉当天的单词', true);
 
-    // ---------- 用手动粘贴把词表补齐 ----------
-    await cdp.eval(`document.getElementById('btnImport').click(); 'ok'`);
-    await sleep(150);
-    await cdp.eval(`document.querySelector('.tab[data-tab="paste"]').click(); 'ok'`);
+    // ---------- 直接敲单词（不弹窗、不切标签） ----------
+    await cdp.eval(`document.getElementById('intakeText').scrollIntoView({ block: 'center' }); 'ok'`);
+    await sleep(300);
+    await cdp.eval(`document.getElementById('pasteBox').focus(); 'ok'`);
     await cdp.eval(`(() => {
       const t = document.getElementById('pasteBox');
       t.value = 'abandon 放弃\\nprocedure /prəˈsiːdʒə/ n. 程序\\nreluctant 不情愿的\\nvivid 生动的\\ncautious 谨慎的';
@@ -429,10 +497,45 @@ function seed() {
     })()`);
     await waitFor(() => cdp.eval(`document.querySelectorAll('#pastePreview .pv-word').length === 5`), { label: '粘贴预览' });
     check('粘贴即时预览工作正常', true);
-    await cdp.eval(`document.getElementById('btnSaveWords').click(); 'ok'`);
+    check(
+      '「保存到词表」贴在打字区右下角',
+      (await cdp.eval(
+        `(() => { const b = document.getElementById('btnSavePaste'); const ta = document.getElementById('pasteBox');
+           const panel = document.getElementById('intakeText');
+           const rb = b.getBoundingClientRect(), rt = ta.getBoundingClientRect(), rp = panel.getBoundingClientRect();
+           const inner = getComputedStyle(panel.querySelector('.intake-body')).paddingRight.replace('px', '') * 1;
+           return rb.top > rt.bottom && Math.abs(rb.right - (rp.right - inner)) < 2; })()`
+      )) === true
+    );
+    await cdp.eval(`document.getElementById('btnSavePaste').click(); 'ok'`);
     await waitFor(() => cdp.eval(`document.querySelectorAll('.word-chip').length === 5`), { label: '词表补齐' });
     check('侧栏凑齐 5 个单词', true);
-    await cdp.eval(`document.querySelector('#modalImport [data-close]').click(); 'ok'`);
+    check('保存后单词框自动清空', (await cdp.eval(`document.getElementById('pasteBox').value`)) === '');
+
+    // ---------- 在页面空白处 Ctrl+V 文字，自动落进单词框 ----------
+    await cdp.eval(`(() => {
+      const t = document.getElementById('pasteBox');
+      t.value = '';
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      return 'ok';
+    })()`);
+    await cdp.eval(`(() => {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', 'lucid 清晰的');
+      document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      return 'ok';
+    })()`);
+    await waitFor(() => cdp.eval(`document.getElementById('pasteBox').value.includes('lucid')`), {
+      label: '粘贴文字自动落进单词框',
+    });
+    check('页面空白处粘贴文字会落进单词框', true);
+    await cdp.eval(`(() => {
+      const t = document.getElementById('pasteBox');
+      t.value = '';
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'ok';
+    })()`);
 
     // ---------- 生成文章 ----------
     await cdp.eval(`document.getElementById('btnGenerate').click(); 'ok'`);
