@@ -14,6 +14,8 @@ const state = {
   missing: 0,
   marks: [],
   filling: false,
+  // 「我的生词」里两个栏目二选一显示，默认看还没背下来的
+  mineFilter: 'learning',
 };
 
 /* ---------------- 基础工具 ---------------- */
@@ -231,39 +233,54 @@ function groupsHTML(groups, mastered) {
 function renderMine(items) {
   const learning = items.filter((it) => !it.mastered);
   const mastered = items.filter((it) => it.mastered);
-  if (!items.length) return '';
+  const f = state.mineFilter === 'mastered' ? 'mastered' : 'learning';
+  const list = f === 'mastered' ? mastered : learning;
+
+  // 快捷切换：学习中 / 已掌握，一次只看一摞，不用往下滚去找另一摞
+  const sw = `<div class="mine-switch" role="tablist" aria-label="生词状态">
+    <button type="button" role="tab" data-minefilter="learning"
+            class="mine-tab${f === 'learning' ? ' active' : ''}"
+            aria-selected="${f === 'learning'}">学习中 <span class="count">${learning.length}</span></button>
+    <button type="button" role="tab" data-minefilter="mastered"
+            class="mine-tab${f === 'mastered' ? ' active' : ''}"
+            aria-selected="${f === 'mastered'}">已掌握 <span class="count">${mastered.length}</span></button>
+  </div>`;
+
+  if (!list.length) {
+    return (
+      sw +
+      `<p class="tip empty-tip">${
+        f === 'mastered'
+          ? '还没有标记为已掌握的词。背下来一个，就在它那一行点「已掌握」。'
+          : '学习中的词都背完了 —— 去「已掌握」看看，或者继续在正文里收藏新词。'
+      }</p>`
+    );
+  }
 
   // 按字母排时不按天分组，整段平铺；按时间排才分组
   const grouped = state.sort.startsWith('time-');
-  const rows = (list, isMastered) =>
-    grouped
-      ? groupsHTML(groupByDay(list, (m) => (isMastered ? m.masteredAt || m.time : m.time)), isMastered)
-      : `<ul class="mark-rows">${list.map((m) => rowHTML(m, isMastered)).join('')}</ul>`;
+  const isMastered = f === 'mastered';
+  const body = grouped
+    ? groupsHTML(groupByDay(list, (m) => (isMastered ? m.masteredAt || m.time : m.time)), isMastered)
+    : `<ul class="mark-rows">${list.map((m) => rowHTML(m, isMastered)).join('')}</ul>`;
 
-  const parts = [];
-  if (learning.length) {
-    parts.push(`<section class="marks-section">
-      <div class="section-heading">
-        <h3>学习中 <span class="count">${learning.length}</span></h3>
-        <p>还没背下来的词。背下来就点这一行的「已掌握」。</p>
-      </div>
-      <div class="mark-groups">${rows(learning, false)}</div>
-    </section>`);
-  }
-  if (mastered.length) {
-    parts.push(`<section class="marks-section">
-      <div class="section-heading">
-        <h3>已掌握 <span class="count">${mastered.length}</span></h3>
-        <p>按掌握日期排。想再背一遍，点「退回学习」。</p>
-      </div>
-      <div class="mark-groups">${rows(mastered, true)}</div>
-    </section>`);
-  }
   const q = state.query.trim();
-  if (q) {
-    parts.unshift(`<p class="tip">匹配「${esc(q)}」的生词：${items.length} 个</p>`);
-  }
-  return parts.join('');
+  const tip = q ? `<p class="tip">匹配「${esc(q)}」的生词：${items.length} 个</p>` : '';
+  return (
+    sw +
+    tip +
+    `<section class="marks-section">
+      <div class="section-heading">
+        <h3>${isMastered ? '已掌握' : '学习中'} <span class="count">${list.length}</span></h3>
+        <p>${
+          isMastered
+            ? '按掌握日期排。想再背一遍，点这一行的「退回学习」。'
+            : '还没背下来的词。背下来就点这一行的「已掌握」。'
+        }</p>
+      </div>
+      <div class="mark-groups">${body}</div>
+    </section>`
+  );
 }
 
 /* ---------------- 渲染：整体 ---------------- */
@@ -408,6 +425,13 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  const mineTab = e.target.closest('[data-minefilter]');
+  if (mineTab) {
+    state.mineFilter = mineTab.dataset.minefilter === 'mastered' ? 'mastered' : 'learning';
+    render();
+    return;
+  }
+
   const clearDay = e.target.closest('[data-clear-day]');
   if (clearDay) {
     e.stopPropagation();
@@ -478,6 +502,8 @@ $('#btnFillMeaning')?.addEventListener('click', () => fillMissingMeanings());
   if (['daily', 'mine', 'phrases'].includes(want)) state.tab = want;
   const wantSort = qs.get('sort');
   if (['time-desc', 'time-asc', 'alpha', 'alpha-desc'].includes(wantSort)) state.sort = wantSort;
+  const wantMine = qs.get('mine');
+  if (['learning', 'mastered'].includes(wantMine)) state.mineFilter = wantMine;
   try {
     await reload();
   } catch (e) {

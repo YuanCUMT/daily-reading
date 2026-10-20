@@ -174,14 +174,28 @@
 
       <div class="workspace" id="work">
         <aside class="sidebar">
+          <section class="panel today-panel" id="todayPanel">
+            <div class="panel-bar">
+              <span class="panel-code">01 / today</span>
+              <button class="mini-btn" id="btnTodayToggle" type="button"
+                      aria-expanded="false" aria-controls="todayList">展开</button>
+            </div>
+            <h2>今日单词 <span class="count" id="todayCount">0</span></h2>
+            <div id="todayList" class="today-list" hidden></div>
+          </section>
+
           <section class="panel">
             <div class="panel-bar">
-              <span class="panel-code">01 / marks</span>
+              <span class="panel-code">02 / marks</span>
               <button class="mini-btn" id="btnAllMarks" title="打开完整单词本">全部</button>
               <button class="mini-btn" id="btnClearMarks" title="清空生词本">清空</button>
             </div>
             <h2>我的生词 <span class="count" id="markCount">0</span></h2>
             <div id="markList" class="mark-list"></div>
+            <div class="panel-jump">
+              <a class="mini-btn" id="btnMineToLearning" href="/vocab.html?tab=mine&mine=learning">学习中</a>
+              <a class="mini-btn" id="btnMineToMastered" href="/vocab.html?tab=mine&mine=mastered">已掌握</a>
+            </div>
             <a class="panel-link" href="/vocab.html?tab=mine">在单词本里看全部 <span aria-hidden="true">→</span></a>
           </section>
         </aside>

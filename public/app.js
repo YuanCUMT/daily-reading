@@ -125,6 +125,7 @@ async function migrateOldStars() {
 function renderAll() {
   renderArchive();
   renderMarks();
+  renderTodayWords();
   renderArticle();
   $('#btnGenerate').disabled = !(state.words?.words?.length);
   const dateLabel = $('#currentDate');
@@ -284,6 +285,57 @@ function renderMarks() {
       </div>`;
     })
     .join('');
+}
+
+/* ---------------- 今日单词（可折叠） ----------------
+   默认折叠：它只是当天的词表，展开后占掉侧栏高度会挡着「我的生词」。 */
+const TODAY_OPEN_KEY = 'bcz.todayOpen';
+
+function todayOpen() {
+  try {
+    return localStorage.getItem(TODAY_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function renderTodayWords() {
+  const box = $('#todayList');
+  if (!box) return;
+  const list = state.words?.words || [];
+  const open = todayOpen();
+  $('#todayCount').textContent = list.length;
+  $('#todayPanel')?.classList.toggle('is-open', open);
+  box.hidden = !open;
+  const btn = $('#btnTodayToggle');
+  if (btn) {
+    btn.textContent = open ? '收起' : '展开';
+    btn.setAttribute('aria-expanded', String(open));
+  }
+  if (!open) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = list.length
+    ? list
+        .map(
+          (w) => `<div class="today-chip" data-today="${esc(w.word)}">
+            <span class="w">${esc(w.word)}</span>
+            ${w.pos ? `<span class="pos">${esc(w.pos)}</span>` : ''}
+            ${w.meaning ? `<span class="m">${esc(w.meaning)}</span>` : ''}
+          </div>`
+        )
+        .join('')
+    : '<p class="tip" style="margin:0">今天还没有导入单词。</p>';
+}
+
+function toggleTodayWords() {
+  try {
+    localStorage.setItem(TODAY_OPEN_KEY, todayOpen() ? '0' : '1');
+  } catch {
+    /* 隐私模式下写不进去也能用，只是记不住 */
+  }
+  renderTodayWords();
 }
 
 function renderArticle() {
@@ -842,7 +894,8 @@ document.addEventListener('click', (e) => {
     e.target.closest('mark.word') ||
     e.target.closest('.gcard') ||
     e.target.closest('.word-chip') ||
-    e.target.closest('.mark-chip');
+    e.target.closest('.mark-chip') ||
+    e.target.closest('.today-chip');
   if (!keep) $('#popover').hidden = true;
 });
 
@@ -1309,6 +1362,13 @@ function bindTop() {
 
   // 下面这几块容器本身不会被重渲染，处理器只能绑一次，否则会叠加
   $('#articleView').addEventListener('click', onArticleClick);
+
+  $('#btnTodayToggle').onclick = () => toggleTodayWords();
+
+  $('#todayList').onclick = (e) => {
+    const chip = e.target.closest('.today-chip');
+    if (chip) openWord(e.clientX, e.clientY, chip.dataset.today, chip);
+  };
 
   $('#markList').onclick = async (e) => {
     const rm = e.target.closest('[data-rm]');

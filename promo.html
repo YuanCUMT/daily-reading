@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每日阅读 — 把今天背的词，读成一篇真题</title>
+<style>
+:root{
+  --bg:#0a0c11; --bg2:#0e121a; --line:rgba(255,255,255,.09);
+  --fg:#eef1f8; --dim:#98a0b4; --dim2:#6d7688;
+  --amber:#ffb35c; --ember:#ff7a4d; --violet:#8f7dff; --mint:#5ee2b0;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --serif:"Iowan Old Style","Palatino Linotype",Georgia,"Songti SC",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.7;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(680px 420px at 18% -8%, rgba(143,125,255,.20), transparent 62%),
+    radial-gradient(720px 460px at 88% 6%, rgba(255,122,77,.16), transparent 60%),
+    radial-gradient(900px 600px at 50% 108%, rgba(94,226,176,.10), transparent 65%)}
+.wrap{max-width:1120px;margin:0 auto;padding:0 26px;position:relative;z-index:1}
+a{color:inherit;text-decoration:none}
+
+nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);
+  background:rgba(10,12,17,.72);border-bottom:1px solid var(--line)}
+.nav-in{display:flex;align-items:center;gap:13px;height:64px}
+.mark{width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;
+  font-weight:800;font-size:13px;letter-spacing:-.4px;color:#0a0c11;
+  background:linear-gradient(135deg,var(--amber),var(--ember))}
+.nm{font-weight:650;font-size:15px;letter-spacing:.2px}
+.nm small{display:block;font-size:11px;font-weight:400;color:var(--dim2);letter-spacing:.4px}
+nav .sp{flex:1}
+nav a.lnk{font-size:13.5px;color:var(--dim);padding:6px 2px;transition:color .2s}
+nav a.lnk:hover{color:var(--fg)}
+nav .ghost{font-size:13px;color:var(--dim);border:1px solid var(--line);border-radius:999px;
+  padding:7px 15px;transition:.2s}
+nav .ghost:hover{color:var(--fg);border-color:rgba(255,255,255,.28)}
+
+.hero{padding:86px 0 20px;text-align:center}
+.tag{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim);
+  border:1px solid var(--line);border-radius:999px;padding:6px 14px;margin-bottom:30px;
+  background:rgba(255,255,255,.03)}
+.tag i{width:6px;height:6px;border-radius:50%;background:var(--mint);box-shadow:0 0 10px var(--mint)}
+h1{font-size:clamp(38px,6.2vw,70px);line-height:1.1;letter-spacing:-.03em;font-weight:760}
+h1 .g{background:linear-gradient(100deg,var(--amber),var(--ember) 42%,var(--violet));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{margin:26px auto 0;max-width:37em;font-size:16px;color:var(--dim);line-height:1.85}
+.btns{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:38px}
+.btn{display:inline-flex;align-items:center;gap:9px;padding:14px 26px;border-radius:12px;
+  font-size:14.5px;font-weight:600;transition:transform .18s,box-shadow .25s}
+.btn.pri{color:#100a06;background:linear-gradient(135deg,var(--amber),var(--ember));
+  box-shadow:0 10px 34px -12px rgba(255,140,80,.75)}
+.btn.pri:hover{transform:translateY(-2px);box-shadow:0 16px 42px -12px rgba(255,140,80,.9)}
+.btn.sec{color:var(--fg);border:1px solid var(--line);background:rgba(255,255,255,.03)}
+.btn.sec:hover{border-color:rgba(255,255,255,.26);background:rgba(255,255,255,.06)}
+
+.stage{margin:64px auto 0;max-width:960px;position:relative}
+.stage::after{content:"";position:absolute;inset:auto 8% -34px;height:90px;
+  background:radial-gradient(closest-side,rgba(255,140,80,.30),transparent);filter:blur(26px);z-index:-1}
+.win{border:1px solid var(--line);border-radius:18px;overflow:hidden;
+  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.02));
+  box-shadow:0 34px 90px -34px rgba(0,0,0,.9),inset 0 0 0 1px rgba(255,255,255,.02);
+  backdrop-filter:blur(8px)}
+.bar{display:flex;align-items:center;gap:7px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.bar b{width:9px;height:9px;border-radius:50%;background:#ff5f57}
+.bar b:nth-child(2){background:#febc2e}.bar b:nth-child(3){background:#28c840}
+.bar span{margin-left:10px;font-size:11.5px;color:var(--dim2);letter-spacing:.5px}
+.doc{padding:30px 34px 34px;text-align:left}
+.doc .k{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}
+.chip{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+.chip.on{color:#100a06;background:var(--amber);border-color:transparent;font-weight:600}
+.doc h3{font-family:var(--serif);font-size:clamp(20px,2.6vw,27px);line-height:1.32;letter-spacing:-.01em}
+.doc .zh{font-size:13px;color:var(--dim2);margin:6px 0 20px}
+.doc p{font-family:var(--serif);font-size:16.5px;line-height:1.95;color:#d9dee9}
+.doc p+p{margin-top:14px}
+mark{background:none;color:var(--amber);font-weight:600;box-shadow:inset 0 -1px 0 rgba(255,179,92,.55)}
+mark.mine{color:var(--mint);box-shadow:inset 0 -1px 0 rgba(94,226,176,.55)}
+.gloss{margin-top:22px;border:1px solid var(--line);border-radius:12px;padding:15px 17px;
+  background:rgba(255,179,92,.05)}
+.gloss .w{font-family:var(--serif);font-size:17px;color:var(--amber);font-weight:600}
+.gloss .w i{font-family:var(--sans);font-style:normal;font-size:12px;color:var(--dim2);margin-left:8px}
+.gloss .m{font-size:13.5px;color:#cfd6e4;margin-top:4px}
+.gloss .x{font-size:12.5px;color:var(--dim);margin-top:6px}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin:78px 0 0;
+  background:var(--line);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.st{background:var(--bg2);padding:26px 20px;text-align:center}
+.st .k{font-size:30px;font-weight:740;letter-spacing:-.02em;
+  background:linear-gradient(135deg,#fff,var(--amber));-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.st .l{font-size:12px;color:var(--dim2);margin-top:6px;letter-spacing:.3px}
+
+section{padding:96px 0 0}
+.eyebrow{font-size:12px;letter-spacing:.22em;color:var(--dim2);text-transform:uppercase;margin-bottom:14px}
+h2{font-size:clamp(26px,3.5vw,40px);line-height:1.24;letter-spacing:-.025em;font-weight:720;margin-bottom:16px}
+.lede{color:var(--dim);font-size:15px;max-width:36em}
+
+.feats{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:44px}
+.feat{border:1px solid var(--line);border-radius:16px;padding:26px 24px;
+  background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));
+  transition:border-color .25s,transform .25s}
+.feat:hover{border-color:rgba(255,179,92,.4);transform:translateY(-3px)}
+.glow{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;margin-bottom:16px;
+  font-size:15px;background:rgba(255,179,92,.12);color:var(--amber)}
+.feat:nth-child(2) .glow{background:rgba(143,125,255,.14);color:var(--violet)}
+.feat:nth-child(3) .glow{background:rgba(94,226,176,.12);color:var(--mint)}
+.feat:nth-child(4) .glow{background:rgba(255,122,77,.14);color:var(--ember)}
+.feat h3{font-size:16.5px;margin-bottom:9px;letter-spacing:-.01em}
+.feat p{font-size:13.8px;color:var(--dim);line-height:1.8}
+code{font-family:var(--serif);font-size:13px;color:var(--amber);background:rgba(255,179,92,.1);
+  padding:1px 6px;border-radius:5px}
+
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:44px}
+.step{position:relative}
+.step .n{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--ember);margin-bottom:12px}
+.step b{display:block;font-size:16px;margin-bottom:7px}
+.step p{font-size:13.5px;color:var(--dim)}
+.step::before{content:"";position:absolute;left:0;top:-16px;width:44px;height:2px;
+  background:linear-gradient(90deg,var(--ember),transparent)}
+
+.cta-wrap{margin-top:96px;padding:1px;border-radius:20px;
+  background:linear-gradient(135deg,rgba(255,179,92,.55),rgba(143,125,255,.4),rgba(94,226,176,.35))}
+.cta{background:var(--bg2);border-radius:19px;padding:54px 44px;text-align:center}
+.cta h2{margin-bottom:12px}
+.cta p{color:var(--dim);font-size:14.5px}
+.cta .btns{margin-top:30px}
+
+footer{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  margin-top:64px;padding:26px 0 40px;border-top:1px solid var(--line);
+  font-size:12.5px;color:var(--dim2)}
+
+@media(max-width:860px){
+  .feats,.steps{grid-template-columns:1fr}
+  .stats{grid-template-columns:1fr 1fr}
+  .doc{padding:22px}
+  nav a.lnk{display:none}
+  .cta{padding:40px 24px}
+  section{padding:70px 0 0}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-in">
+    <div class="mark">D/R</div>
+    <div class="nm">每日阅读<small>DAILY READING · 考研英语</small></div>
+    <div class="sp"></div>
+    <a class="lnk" href="#feat">功能</a>
+    <a class="lnk" href="#demo">样张</a>
+    <a class="lnk" href="#start">开始</a>
+    <a class="ghost" href="https://github.com/YuanCUMT/daily-reading">GitHub ↗</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <div class="hero">
+    <div class="tag"><i></i>本地运行 · 单词与文章不出这台电脑</div>
+    <h1>今天背的词，<br><span class="g">读成一篇真题</span>。</h1>
+    <p class="sub">
+      在百词斩背完单词，截个图扔进来。Windows 自带 OCR 认出来，DeepSeek 把它们写成
+      考研阅读的腔调 —— 长难句拆解、五类题型、逐段翻译，全在一页里。
+    </p>
+    <div class="btns">
+      <a class="btn pri" href="https://github.com/YuanCUMT/daily-reading">取走这份源码 →</a>
+      <a class="btn sec" href="#demo">先看它长什么样</a>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="win">
+      <div class="bar"><b></b><b></b><b></b><span>127.0.0.1:8787</span></div>
+      <div class="doc">
+        <div class="k">
+          <span class="chip on">真题模式</span><span class="chip">C1</span>
+          <span class="chip">7 段</span><span class="chip">约 548 词</span>
+          <span class="chip">本篇用到 15 / 47 个词</span>
+        </div>
+        <h3>The Cost of Convenience: Why Retailers Are Rethinking the Impulse Buy</h3>
+        <div class="zh">便利的代价：零售商为何重新思考冲动消费</div>
+        <p>
+          In 2025, British shoppers returned £6.2 billion worth of online <mark>merchandise</mark>,
+          and roughly a fifth of it was destroyed rather than resold. Such figures have begun to
+          unsettle <mark>retailers</mark> who once treated free returns as a costless marketing tool.
+        </p>
+        <p>
+          The enthusiasm that drives an <mark>impulse</mark> purchase is <mark>notoriously</mark>
+          contagious. <mark class="mine">Retailers</mark> have long <mark>exploited</mark> this,
+          designing apps that mimic slot machines.
+        </p>
+        <div class="gloss">
+          <div class="w">notoriously <i>/nəʊˈtɔːriəsli/ adv.</i></div>
+          <div class="m">众所周知地；出名地（多指不好的事）</div>
+          <div class="x">考研常考 · notoriously difficult 众所周知地难</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="st"><div class="k">0</div><div class="l">第三方依赖</div></div>
+    <div class="st"><div class="k">316</div><div class="l">自动化测试项</div></div>
+    <div class="st"><div class="k">2</div><div class="l">复习 / 真题 模式</div></div>
+    <div class="st"><div class="k">1</div><div class="l">个词只查一次</div></div>
+  </div>
+
+  <section id="feat">
+    <div class="eyebrow">Features</div>
+    <h2>不是背单词 App，<br>是把单词用起来的那一步。</h2>
+    <p class="lede">背和用之间隔着一个东西：语境。这里做的就是补上那一步。</p>
+
+    <div class="feats">
+      <div class="feat">
+        <div class="glow">⌗</div>
+        <h3>截图就能进词表</h3>
+        <p>拖几张截图进来，按字号挑出单词卡上的大字，界面文字和例句自动丢掉，拼错了还会用模型修一遍。</p>
+      </div>
+      <div class="feat">
+        <div class="glow">✎</div>
+        <h3>两种模式，两种用途</h3>
+        <p><code>复习模式</code>把今天 40 个词全塞进去，句子短、记得住；<code>真题模式</code>只挑 15 个，写 400 词的社科议论文，带让步与反驳。</p>
+      </div>
+      <div class="feat">
+        <div class="glow">◎</div>
+        <h3>点词即查，不用切窗口</h3>
+        <p>正文里点任何单词、拖选任何短语就弹释义，附考研常考义项与搭配。收藏的词在正文里立刻变绿。</p>
+      </div>
+      <div class="feat">
+        <div class="glow">▤</div>
+        <h3>三个完整的单词本</h3>
+        <p>每日导入的词、收藏的生词、收藏的短语分开放。按天分组或按字母排，缺释义的词一键补齐，补一次永久缓存。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="demo">
+    <div class="eyebrow">Reading flow</div>
+    <h2>背过的词，第二天还会遇见。</h2>
+    <p class="lede">
+      昨天导入的词，今天生成文章时仍然在候选池里。你不需要记得自己背过什么 ——
+      它按遗忘曲线把旧词翻出来，塞进新的语境。
+    </p>
+  </section>
+
+  <section id="start">
+    <div class="eyebrow">Setup</div>
+    <h2>Windows 上，三步开始。</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="n">STEP 01</div>
+        <b>装 Node.js 18+</b>
+        <p>唯一的前提。截图识别用的是 Windows 自带 OCR，不用另装任何东西。</p>
+      </div>
+      <div class="step">
+        <div class="n">STEP 02</div>
+        <b>双击 start.cmd</b>
+        <p>浏览器自动打开 <code>127.0.0.1:8787</code>，右上角 ⚙️ 填一个 DeepSeek API Key。</p>
+      </div>
+      <div class="step">
+        <div class="n">STEP 03</div>
+        <b>导入今天的词</b>
+        <p>拖截图或直接粘贴，勾选要用的词，点「生成文章」。明天它还认得你昨天背了什么。</p>
+      </div>
+    </div>
+
+    <div class="cta-wrap">
+      <div class="cta">
+        <h2>今天背的词，别只停在卡片上。</h2>
+        <p>开源 · 零依赖 · 数据全在本地 · MIT</p>
+        <div class="btns">
+          <a class="btn pri" href="https://github.com/YuanCUMT/daily-reading">YuanCUMT / daily-reading →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>每日阅读 · 考研英语</span>
+    <span>单词存在 data/words/，生词存在 data/marks.json，不上传任何服务器</span>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -244,7 +244,7 @@ function seed() {
       })`)
     );
     check('侧栏初始没有生词', initial.chips === 0);
-    check('侧栏不再有「今日单词」面板', initial.hasWordPanel === false);
+    check('侧栏不再有旧的词表面板', initial.hasWordPanel === false);
     check('空态可见', initial.emptyVisible === true);
     check('页面标题是考研版', initial.title.includes('考研'), initial.title);
     check('界面上已经没有百词斩导入', initial.hasBaicizhan === false);
@@ -500,6 +500,45 @@ function seed() {
 
     // ---------- 划词查词 + 生词本 ----------
     check('侧栏有生词本面板', (await cdp.eval(`!!document.getElementById('markList')`)) === true);
+
+    // ---------- 今日单词面板：可折叠，默认折叠 ----------
+    const today0 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        panel: !!document.getElementById('todayPanel'),
+        count: document.getElementById('todayCount').textContent,
+        words: (state.words?.words || []).length,
+        hidden: document.getElementById('todayList').hidden,
+        label: document.getElementById('btnTodayToggle').textContent.trim()
+      })`)
+    );
+    check('侧栏有今日单词面板', today0.panel && today0.count === String(today0.words), JSON.stringify(today0));
+    check('今日单词默认折叠', today0.hidden === true && today0.label === '展开', JSON.stringify(today0));
+
+    await cdp.eval(`document.getElementById('btnTodayToggle').click(); 'ok'`);
+    await sleep(250);
+    const today1 = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        hidden: document.getElementById('todayList').hidden,
+        label: document.getElementById('btnTodayToggle').textContent.trim(),
+        chips: document.querySelectorAll('#todayList .today-chip').length,
+        stored: localStorage.getItem('bcz.todayOpen')
+      })`)
+    );
+    check('点展开后能看到今日单词', today1.hidden === false && today1.chips === today0.words, JSON.stringify(today1));
+    check('折叠状态记进了本地存储', today1.stored === '1' && today1.label === '收起', JSON.stringify(today1));
+
+    // 点面板里的词也要能查
+    await cdp.eval(`document.querySelector('#todayList .today-chip').click(); 'ok'`);
+    await sleep(400);
+    check('点今日单词里的词会弹释义', (await cdp.eval(`!document.getElementById('popover').hidden`)) === true);
+    await cdp.eval(`document.getElementById('popover').hidden = true; 'ok'`);
+
+    await cdp.eval(`document.getElementById('btnTodayToggle').click(); 'ok'`);
+    await sleep(200);
+    check(
+      '再点一次收起',
+      (await cdp.eval(`document.getElementById('todayList').hidden && localStorage.getItem('bcz.todayOpen') === '0'`)) === true
+    );
 
     // 点正文里一个「不是今天目标词」的生词 —— 这才是查词功能真正的用处
     const clickedWord = await cdp.eval(`(() => {
@@ -1184,16 +1223,44 @@ function seed() {
         dayRules: document.querySelectorAll('#vocabBody .marks-section:first-of-type .day-rule').length,
         todayTags: document.querySelectorAll('#vocabBody .day-head .day-tag').length,
         navCount: document.getElementById('navCount').textContent,
-        navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || ''
+        navCurrent: document.querySelector('.page-nav a[aria-current="page"]')?.textContent || '',
+        switches: [...document.querySelectorAll('#vocabBody .mine-tab')].map((b) => ({
+          k: b.dataset.minefilter,
+          on: b.classList.contains('active'),
+          n: (b.querySelector('.count') || {}).textContent || ''
+        }))
       })`)
     );
 
     check('单词本页标题正确', page1.title.includes('单词本'), page1.title);
-    check('「我的生词」把词分成学习中和已掌握', page1.learningRows === expectLearning && page1.masteredRows === expectMastered, JSON.stringify(page1) + ` 期望 ${expectLearning}/${expectMastered}`);
+    check('「我的生词」默认只显示学习中', page1.learningRows === expectLearning && page1.masteredRows === 0,
+      JSON.stringify(page1) + ` 期望 学习中 ${expectLearning}`);
+    check('有学习中 / 已掌握两个快捷切换',
+      page1.switches.length === 2 && page1.switches[0].on === true && page1.switches[1].on === false,
+      JSON.stringify(page1.switches));
+    check('切换按钮上带各自计数',
+      page1.switches[0].n === String(expectLearning) &&
+        (expectMastered === 0 || page1.switches[1].n === String(expectMastered)),
+      JSON.stringify(page1.switches));
     check('两摞的计数与行数一致',
-      page1.sections.find((s) => s.t === '学习中')?.n === String(expectLearning) &&
-        (expectMastered === 0 || page1.sections.find((s) => s.t === '已掌握')?.n === String(expectMastered)),
+      page1.sections.find((s) => s.t === '学习中')?.n === String(expectLearning),
       JSON.stringify(page1.sections));
+
+    // 点「已掌握」这一格，应该只显示已掌握的那摞
+    await cdp.eval(`document.querySelector('#vocabBody [data-minefilter="mastered"]').click(); 'ok'`);
+    await sleep(300);
+    const masteredView = JSON.parse(
+      await cdp.eval(`JSON.stringify({
+        learningRows: document.querySelectorAll('#vocabBody .mark-row:not(.is-mastered)').length,
+        masteredRows: document.querySelectorAll('#vocabBody .mark-row.is-mastered').length,
+        on: document.querySelector('#vocabBody .mine-tab.active')?.dataset.minefilter
+      })`)
+    );
+    check('切到已掌握后只剩已掌握那摞',
+      masteredView.on === 'mastered' && masteredView.learningRows === 0 && masteredView.masteredRows === expectMastered,
+      JSON.stringify(masteredView) + ` 期望 ${expectMastered}`);
+    await cdp.eval(`document.querySelector('#vocabBody [data-minefilter="learning"]').click(); 'ok'`);
+    await sleep(250);
     check('按天分组（一天一组）', page1.dayHeads === expectDays, `${page1.dayHeads} 组 / 期望 ${expectDays}`);
     check('每组都有一条分割横线', page1.dayRules === page1.dayHeads, JSON.stringify(page1));
     check('今天的组带「今天」标记', page1.todayTags >= 1, String(page1.todayTags));
@@ -1219,28 +1286,41 @@ function seed() {
     await cdp.eval(`(() => { const s = document.getElementById('vocabSort'); s.value = 'time-desc'; s.dispatchEvent(new Event('change')); return 'ok'; })()`);
     await sleep(250);
 
-    // 点「已掌握」：这个词应该从学习中挪到已掌握
+    // 点「已掌握」：这个词应该从学习中消失，出现在已掌握那摞
     await cdp.eval(`document.querySelector('#vocabBody .mark-row[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`!!document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"]')`), {
-      label: '标记已掌握后挪到另一摞',
+    await waitFor(() => cdp.eval(`!document.querySelector('#vocabBody .mark-row[data-word="ledger"]')`), {
+      label: '标记已掌握后从学习中消失',
     });
-    const afterMaster = JSON.parse(
+    const afterLearning = JSON.parse(
       await cdp.eval(`JSON.stringify({
         learning: document.querySelectorAll('#vocabBody .mark-row:not(.is-mastered)').length,
+        switchN: document.querySelector('#vocabBody .mine-tab[data-minefilter="learning"] .count').textContent
+      })`)
+    );
+    check('标成已掌握后从学习中消失', afterLearning.learning === expectLearning - 1, JSON.stringify(afterLearning));
+    check('切换按钮上的计数跟着变', afterLearning.switchN === String(expectLearning - 1), JSON.stringify(afterLearning));
+
+    // 切到已掌握那摞确认它真的在那
+    await cdp.eval(`document.querySelector('#vocabBody [data-minefilter="mastered"]').click(); 'ok'`);
+    await sleep(300);
+    const afterMaster = JSON.parse(
+      await cdp.eval(`JSON.stringify({
         mastered: document.querySelectorAll('#vocabBody .mark-row.is-mastered').length,
+        hasLedger: !!document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"]'),
         masterLabel: document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"] [data-act="master"]')?.textContent
       })`)
     );
-    check('标成已掌握后从学习中消失', afterMaster.learning === expectLearning - 1, JSON.stringify(afterMaster));
-    check('标成已掌握后出现在已掌握那摞', afterMaster.mastered === expectMastered + 1, JSON.stringify(afterMaster));
+    check('标成已掌握后出现在已掌握那摞', afterMaster.mastered === expectMastered + 1 && afterMaster.hasLedger, JSON.stringify(afterMaster));
     check('已掌握那行给的是「退回学习」', afterMaster.masterLabel === '退回学习', String(afterMaster.masterLabel));
 
     // 再点回去
     await cdp.eval(`document.querySelector('#vocabBody .mark-row.is-mastered[data-word="ledger"] [data-act="master"]').click(); 'ok'`);
-    await waitFor(() => cdp.eval(`!!document.querySelector('#vocabBody .mark-row:not(.is-mastered)[data-word="ledger"]')`), {
+    await waitFor(() => cdp.eval(`!document.querySelector('#vocabBody .mark-row[data-word="ledger"]')`), {
       label: '退回学习',
     });
     check('能退回学习中', true);
+    await cdp.eval(`document.querySelector('#vocabBody [data-minefilter="learning"]').click(); 'ok'`);
+    await sleep(250);
 
     // 空态文案：清空后给提示
     const cleared = await (await fetch(`${BASE}/api/marks?all=1`, { method: 'DELETE' })).json();
