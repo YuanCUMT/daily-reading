@@ -443,7 +443,8 @@ document.addEventListener('click', async (e) => {
     if (btn.dataset.act === 'master') {
       const next = btn.dataset.next === '1';
       await setMastered(word, next);
-      if (cardOpen) openCard(word);
+      // 置为已掌握（或退回学习）后这个词就换了一摞，词条卡片跟着收起，别让旧卡片留在屏幕上
+      if (cardOpen) closeCard();
       return toast(next ? `「${word}」挪到已掌握` : `「${word}」回到学习中`);
     }
     if (btn.dataset.act === 'remove') {
